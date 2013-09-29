@@ -86,7 +86,7 @@ module Brewsky
 						return name
 					end
 				else
-					return "'" + entity.get_attribute(ifc_type, 'Name') + "'"
+					return entity.get_attribute(ifc_type, 'Name')
 				end
 			end # set_name
 			
@@ -111,7 +111,7 @@ module Brewsky
 						return description
 					end
 				else
-					return "'" + entity.get_attribute(ifc_type, 'Description') + "'"
+					return entity.get_attribute(ifc_type, 'Description')
 				end
 			end # set_description
 		end # IfcBase
