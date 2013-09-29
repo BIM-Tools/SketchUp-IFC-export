@@ -1,0 +1,92 @@
+html {
+	font-family: Tahoma, Verdana, Arial, Helvetica, sans-serif;
+	font-size: small;
+	height: 100%;
+	background-color: #f0f0f0;
+}
+body {
+	margin: 1px;
+	padding: 0;
+}
+h1 {
+	font-size: 1em;
+	font-weight: bold;
+	vertical-align:middle;
+	height: 24px;
+	margin: 0;
+	padding: 0;
+	margin-left: 6px;
+	margin-bottom: 0.2em;
+	background-repeat: no-repeat;
+	background-position: right top;
+}
+h2 {
+	font-size: 1em;
+	font-weight: bold;
+	margin: 0;
+	padding: 0;
+	margin-left: 5%;
+	margin-bottom: 0.1em;
+}
+p {
+	height: 1em;
+}
+hr {
+	clear:both;
+	margin: 0;
+	padding: 0;
+	height: 0;
+	border: 0;
+	border-bottom: 1px solid #a0a0a0;
+}
+img {
+	vertical-align:middle;
+	margin-right: 6px;
+	border: 0;
+}
+a {
+	color: #000000;
+	text-decoration: none;
+}
+form {
+	margin: 0;
+	padding: 0;
+}
+label {
+	display: block;
+	float: left;
+	width: 37%;
+	height: 1em;
+	margin: 0;
+	padding: 0;
+	margin-left: 5%;
+}
+input {
+	font-size: 1em;
+	height: 1.2em;
+	width: 50%;
+}
+select {
+	font-size: 1em;
+	width: 50%;
+	height: 1.5em;
+}
+form hr {
+}
+form #submit {
+	font-size: 1em;
+	height: 22px;
+	width: 90%;
+	margin: 0.4em 5% 0.4em 5%;
+}
+ul {
+	width: 100%;
+	margin: 0;
+	padding: 4px;
+	list-style-type: none;
+}
+li {
+	margin: 0;
+	padding: 0;
+	float: left;
+}

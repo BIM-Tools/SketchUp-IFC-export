@@ -1,0 +1,16 @@
+html {
+}
+input, select {
+	position: relative;
+	float: left;
+	width: 100%;
+}
+table
+{
+	border-collapse:collapse;
+	vertical-align:middle;
+}
+.indenter, span {
+	padding:0;
+	margin:0;
+}
