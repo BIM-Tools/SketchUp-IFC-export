@@ -621,15 +621,19 @@ module Brewsky
 				@a_Attributes << set_IfcFaces(entity)
 			end
 			def set_IfcFaces(entity)
+				hVertices = Hash.new
 				aFaces = Array.new
 				
 				# in this case we need a definition, not an instance
 				definition = Brewsky::IFC::definition(entity)
 				definition.entities.each do |ent|
 					if ent.is_a? Sketchup::Face
-						aFaces << IfcFace.new(@ifc_exporter, ent).record_nr
+						aFaces << IfcFace.new(@ifc_exporter, ent, hVertices).record_nr
 					end
 				end
+				
+				puts hVertices.length
+				
 				return @ifc_exporter.ifcList(aFaces)
 			end
 		end
@@ -641,20 +645,20 @@ module Brewsky
 			# Bounds        SET OF IfcFaceBound (ENTITY)	  IfcFace
 			
 			attr_accessor :record_nr
-			def initialize(ifc_exporter, entity)
+			def initialize(ifc_exporter, entity, hVertices)
 				init_common(ifc_exporter)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_IfcFaceBound(entity)
+				@a_Attributes << set_IfcFaceBound(entity, hVertices)
 			end
-			def set_IfcFaceBound(entity)
+			def set_IfcFaceBound(entity, hVertices)
 				aFace = Array.new
 				entity.loops.each do |loop|
 					if loop == entity.outer_loop
-						aFace << IfcFaceOuterBound.new(@ifc_exporter, loop).record_nr
+						aFace << IfcFaceOuterBound.new(@ifc_exporter, loop, hVertices).record_nr
 					else
-						aFace << IfcFaceBound.new(@ifc_exporter, loop).record_nr
+						aFace << IfcFaceBound.new(@ifc_exporter, loop, hVertices).record_nr
 					end
 				end
 				return @ifc_exporter.ifcList(aFace)
@@ -669,12 +673,12 @@ module Brewsky
 			# Orientation   BOOLEAN	          IfcFaceBound
 			
 			attr_accessor :record_nr
-			def initialize(ifc_exporter, entity)
+			def initialize(ifc_exporter, entity, hVertices)
 				init_common(ifc_exporter)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << IfcPolyLoop.new(@ifc_exporter, entity).record_nr
+				@a_Attributes << IfcPolyLoop.new(@ifc_exporter, entity, hVertices).record_nr
 				@a_Attributes << ".T."
 			end
 		end
@@ -687,12 +691,12 @@ module Brewsky
 			# Orientation   BOOLEAN	          IfcFaceBound
 			
 			attr_accessor :record_nr
-			def initialize(ifc_exporter, entity)
+			def initialize(ifc_exporter, entity, hVertices)
 				init_common(ifc_exporter)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << IfcPolyLoop.new(@ifc_exporter, entity).record_nr
+				@a_Attributes << IfcPolyLoop.new(@ifc_exporter, entity, hVertices).record_nr
 				@a_Attributes << ".T."
 			end
 		end
@@ -705,19 +709,22 @@ module Brewsky
 			# Polygon   LIST OF IfcCartesianPoint (ENTITY) (ENTITY)	IfcPolyLoop
 
 			attr_accessor :record_nr
-			def initialize(ifc_exporter, entity)
+			def initialize(ifc_exporter, entity, hVertices)
 				init_common(ifc_exporter)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_Polygon(entity)
+				@a_Attributes << set_Polygon(entity, hVertices)
 			end
-			def set_Polygon(entity)
+			def set_Polygon(entity, hVertices)
 				aPts = Array.new
 				entity.vertices.each do |vertex|
-					position = vertex.position
-					ifcCartesianPoint = IfcCartesianPoint.new(@ifc_exporter, position)
-					aPts << ifcCartesianPoint.record_nr
+					
+					# check if the given vertex already has an IfcCartesianPoint
+					unless hVertices[vertex]
+						hVertices[vertex] = IfcCartesianPoint.new(@ifc_exporter, vertex.position)
+					end
+					aPts << hVertices[vertex].record_nr
 				end
 				return @ifc_exporter.ifcList(aPts)
 			end
