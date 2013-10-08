@@ -631,9 +631,6 @@ module Brewsky
 						aFaces << IfcFace.new(@ifc_exporter, ent, hVertices).record_nr
 					end
 				end
-				
-				puts hVertices.length
-				
 				return @ifc_exporter.ifcList(aFaces)
 			end
 		end
