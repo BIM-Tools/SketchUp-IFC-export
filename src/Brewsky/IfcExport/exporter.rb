@@ -147,12 +147,12 @@ module Brewsky
 				ifc_entities = Array.new
 				entities.each do |entity|
 					if entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
-						if entity.manifold?							
+						if entity.manifold?
 							ifc_entities << entity
 						end
 					end
 				end
-				return entities
+				return ifc_entities
 			end
 			def add(entity)
 				new_record_nr = @a_Ifc.length + 1

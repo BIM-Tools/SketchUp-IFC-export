@@ -72,10 +72,9 @@ module Brewsky
 				
 				if entity.get_attribute(ifc_type, 'Name').nil?
 					unless su_name.nil? || entity.name == ""
-						name = "'" + entity.name + "'"
+						name = entity.name
 						entity.set_attribute(ifc_type, 'Name', name)
 					end
-					
 					if name.nil?
 						if self.get_default(ifc_type, 'Name').nil?
 							return nil
@@ -83,10 +82,10 @@ module Brewsky
 							return "'" + self.get_default(ifc_type, 'Name') + "'"
 						end
 					else
-						return name
+						return "'" + name + "'"
 					end
 				else
-					return entity.get_attribute(ifc_type, 'Name')
+					return "'" + entity.get_attribute(ifc_type, 'Name') + "'"
 				end
 			end # set_name
 			
@@ -97,7 +96,7 @@ module Brewsky
 				
 				if entity.get_attribute(ifc_type, 'Description').nil?
 					unless su_description.nil? || entity.description == ""
-						description = "'" + entity.description + "'"
+						description = entity.description
 						entity.set_attribute(ifc_type, 'Description', description)
 					end
 					
@@ -108,10 +107,10 @@ module Brewsky
 							return "'" + self.get_default(ifc_type, 'Description') + "'"
 						end
 					else
-						return description
+						return "'" + description + "'"
 					end
 				else
-					return entity.get_attribute(ifc_type, 'Description')
+					return "'" + entity.get_attribute(ifc_type, 'Description') + "'"
 				end
 			end # set_description
 		end # IfcBase
@@ -303,11 +302,11 @@ module Brewsky
 			attr_accessor :globalId, :name, :description, :record_nr#, :ownerHistory        
 			def set_globalId(entity, ifc_type)
 				if entity.get_attribute(ifc_type, "GlobalId")
-					return entity.get_attribute(ifc_type, "GlobalId")
+					return "'" + entity.get_attribute(ifc_type, "GlobalId") + "'"
 				else
-					guid = "'" + Brewsky::IFC::new_guid + "'"
+					guid = Brewsky::IFC::new_guid
 					entity.set_attribute(ifc_type, "GlobalId", guid)
-					return guid
+					return "'" + guid + "'"
 				end
 			end
 
@@ -541,27 +540,23 @@ module Brewsky
 			# ExtrudedDirection	IfcDirection (ENTITY)	          IfcExtrudedAreaSolid
 			# Depth	            IfcPositiveLengthMeasure (REAL)	IfcExtrudedAreaSolid
 			attr_accessor :sweptArea, :position, :extrudedDirection, :depth, :record_nr, :entityType
-			def initialize(ifc_exporter, bt_entity, loop, depth=nil)
-				@ifc_exporter = ifc_exporter
-				@bt_entity = bt_entity
-				@loop = loop
-				@entityType = "IFCEXTRUDEDAREASOLID"
-				@ifc_exporter.add(self)
+			def initialize(ifc_exporter, bt_entity, face, edge=nil)
+				init_common(ifc_exporter)
 				
-				offset = @bt_entity.offset * -1
-				vector = Geom::Vector3d.new 0,0,offset
-				@transformation = Geom::Transformation.translation vector
+				#offset = @bt_entity.offset * -1
+				#vector = Geom::Vector3d.new 0,0,offset
+				@transformation = Geom::Transformation.new#.translation vector
 				
 				#@transformation = @bt_entity.geometry.transformation
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_SweptArea
+				@a_Attributes << set_SweptArea(face)
 				@a_Attributes << set_Position
-				@a_Attributes << set_ExtrudedDirection(loop)
-				@a_Attributes << set_Depth(depth)
+				@a_Attributes << set_ExtrudedDirection(edge)
+				@a_Attributes << set_Depth(edge)
 			end
-			def set_SweptArea
+			def set_SweptArea(face)
 		#85 = IFCARBITRARYCLOSEDPROFILEDEF(.AREA., $, #86);
 		#86 = IFCPOLYLINE((#87, #88, #89, #90, #91));
 		#87 = IFCCARTESIANPOINT((0., 0.));
@@ -569,21 +564,27 @@ module Brewsky
 		#89 = IFCCARTESIANPOINT((5., 3.000E-1));
 		#90 = IFCCARTESIANPOINT((5., 0.));
 		#91 = IFCCARTESIANPOINT((0., 0.));
-				return IfcArbitraryClosedProfileDef.new(@ifc_exporter, @bt_entity, @loop).record_nr
+				if face.loops.length == 1
+					return IfcArbitraryClosedProfileDef.new(@ifc_exporter, @bt_entity, face).record_nr
+				else
+					return IfcArbitraryProfileDefWithVoids.new(@ifc_exporter, @bt_entity, face).record_nr
+				end
 			end
 			def set_Position
 				return IfcAxis2Placement3D.new(@ifc_exporter, @transformation).record_nr
 			end
-			def set_ExtrudedDirection(loop)
-				vec = Geom::Vector3d.new(0,0,1) #loop.face.normal.transform @transformation.inverse#@transformation.zaxis#.reverse #
+			def set_ExtrudedDirection(edge)
+				vec = edge.line[1]#Geom::Vector3d.new(0,0,1) #loop.face.normal.transform @transformation.inverse#@transformation.zaxis#.reverse #
 				return IfcDirection.new(@ifc_exporter, vec).record_nr
 			end
-			def set_Depth(depth=nil)
-				if depth.nil?
-					return @ifc_exporter.ifcLengthMeasure(@bt_entity.width)
-				else
-					return @ifc_exporter.ifcLengthMeasure(depth)
-				end
+			def set_Depth(edge)
+				vector = edge.end.position - edge.start.position
+				return @ifc_exporter.ifcLengthMeasure(vector.length)
+				#if depth.nil?
+					#return @ifc_exporter.ifcLengthMeasure(@bt_entity.width)
+				#else
+					#return @ifc_exporter.ifcLengthMeasure(depth)
+				#end
 			end
 		end
 
@@ -749,30 +750,59 @@ module Brewsky
 		end
 		
 		class IfcArbitraryClosedProfileDef < IfcBase
+			# Attribute		Type											Defined By
+			# ProfileType	IfcProfileTypeEnum (ENUM)	IfcProfileDef
+			# ProfileName	IfcLabel (STRING)					IfcProfileDef
+			# OuterCurve	IfcCurve (ENTITY)					IfcArbitraryClosedProfileDef
 			attr_accessor :record_nr, :entityType
-			def initialize(ifc_exporter, bt_entity, loop)
-				@ifc_exporter = ifc_exporter
-				@bt_entity = bt_entity
-				@loop = loop
-				@entityType = "IFCARBITRARYCLOSEDPROFILEDEF"
-				@ifc_exporter.add(self)
+			def initialize(ifc_exporter, entity, face)
+				init_common(ifc_exporter)
+				loop = face.outer_loop
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
 				@a_Attributes << ".AREA."
 				@a_Attributes << nil
-				@a_Attributes << IfcPolyline.new(@ifc_exporter, @bt_entity, @loop).record_nr
+				@a_Attributes << IfcPolyline.new(@ifc_exporter, loop).record_nr
+			end
+		end
+		
+		class IfcArbitraryProfileDefWithVoids < IfcBase
+			# Attribute		Type											Defined By
+			# ProfileType	IfcProfileTypeEnum (ENUM)	IfcProfileDef
+			# ProfileName	IfcLabel (STRING)					IfcProfileDef
+			# OuterCurve	IfcCurve (ENTITY)					IfcArbitraryClosedProfileDef
+			# InnerCurves	SET OF IfcCurve (ENTITY)	IfcArbitraryProfileDefWithVoids
+			attr_accessor :record_nr, :entityType
+			def initialize(ifc_exporter, entity, face)
+				init_common(ifc_exporter)
+				loop = face.outer_loop
+				inner_loops = get_inner_loops(face)
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << ".AREA."
+				@a_Attributes << nil
+				@a_Attributes << IfcPolyline.new(@ifc_exporter, loop).record_nr
+				@a_Attributes << ifc_exporter.ifcList(inner_loops)
+			end
+			def get_inner_loops(face)
+				outer_loop = face.outer_loop
+				inner_loops = Array.new
+				face.loops.each do |loop|
+					unless loop == outer_loop
+						inner_loops << IfcPolyline.new(@ifc_exporter, loop).record_nr
+					end
+				end
+				return inner_loops
 			end
 		end
 		
 		class IfcPolyline < IfcBase
 			attr_accessor :record_nr, :entityType
-			def initialize(ifc_exporter, bt_entity, loop, closed=true)
-				@ifc_exporter = ifc_exporter
-				@bt_entity = bt_entity
+			def initialize(ifc_exporter, loop, closed=true)
+				init_common(ifc_exporter)
 				@loop = loop
-				@entityType = "IFCPOLYLINE"
-				@ifc_exporter.add(self)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
@@ -783,8 +813,8 @@ module Brewsky
 				#verts = @loop.vertices
 				#verts.each do |vert|
 					#position = vert.position#.transform! t
-				@loop.each do |position|
-					ifcCartesianPoint = IfcCartesianPoint.new(@ifc_exporter, position)
+				@loop.vertices.each do |vertex|
+					ifcCartesianPoint = IfcCartesianPoint.new(@ifc_exporter, vertex.position)
 					pts << ifcCartesianPoint.record_nr
 				end
 
@@ -865,9 +895,7 @@ module Brewsky
 		class IfcCartesianPoint < IfcBase
 			attr_accessor :coordinates
 			def initialize(ifc_exporter, point3d)
-				@ifc_exporter = ifc_exporter
-				@entityType = "IFCCARTESIANPOINT"
-				ifc_exporter.add(self)
+				init_common(ifc_exporter)
 				@coordinates = point3d
 				
 				# "local" IFC array
@@ -886,9 +914,7 @@ module Brewsky
 		class IfcDirection < IfcBase
 			attr_accessor :directionRatios
 			def initialize(ifc_exporter, vector)
-				@ifc_exporter = ifc_exporter
-				@entityType = "IFCDIRECTION"
-				ifc_exporter.add(self)
+				init_common(ifc_exporter)
 				vector.normalize! # direction ratios == x,y and z value of normal vector
 				@directionRatios = vector
 				
@@ -921,10 +947,8 @@ module Brewsky
 			# WorldCoordinateSystem	          IfcAxis2Placement (SELECT)	IfcGeometricRepresentationContext
 			# TrueNorth	                      IfcDirection (ENTITY)	      IfcGeometricRepresentationContext
 			def initialize(ifc_exporter)
+				init_common(ifc_exporter)
 				@model = ifc_exporter.model
-				@ifc_exporter = ifc_exporter
-				@entityType = "IFCGEOMETRICREPRESENTATIONCONTEXT"
-				@ifc_exporter.add(self)
 				
 				transformation = Geom::Transformation.new
 				
@@ -965,11 +989,9 @@ module Brewsky
 		# Quantities	        SET OF IfcPhysicalQuantity (ENTITY)	IfcElementQuantity
 		
 			def initialize(ifc_exporter, planar)
-				@ifc_exporter = ifc_exporter
+				init_common(ifc_exporter)
 				@model = ifc_exporter.model
 				@planar = planar
-				@entityType = "IFCELEMENTQUANTITY"
-				@ifc_exporter.add(self)
 				
 				quantities = Array.new
 				quantities << IfcQuantityLength.new(@ifc_exporter, "Length", planar.length?).record_nr #quantities["Length"] = planar.length?
@@ -1003,10 +1025,8 @@ module Brewsky
 		# RelatingPropertyDefinition	IfcPropertySetDefinition (ENTITY)	IfcRelDefinesByProperties
 			attr_accessor :record_nr
 			def initialize(ifc_exporter, planar, aRelatedObjects)
-				@ifc_exporter = ifc_exporter
+				init_common(ifc_exporter)
 				@model = ifc_exporter.model
-				@entityType = "IFCRELDEFINESBYPROPERTIES"
-				@ifc_exporter.add(self)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
@@ -1411,9 +1431,22 @@ module Brewsky
 			end
 			def set_ProductRepresentation(entity)
 				aRepresentations = Array.new
-				aBrep = Array.new
-				aBrep << IfcFacetedBrep.new(@ifc_exporter, entity).record_nr
-				@representation = IfcShapeRepresentation.new(@ifc_exporter, "'Body'", "'Brep'", aBrep)
+				aGeometry = Array.new
+				
+				# check if the entity can be represented by an IfcExtrudedAreaSolid
+				Sketchup::require File.join(LIB_MAIN_PATH, 'extrusion_check')
+				extrusion = Brewsky::IFC::extrusion?(entity)
+				if extrusion == false
+					aGeometry << IfcFacetedBrep.new(@ifc_exporter, entity).record_nr
+					@representation = IfcShapeRepresentation.new(@ifc_exporter, "'Body'", "'Brep'", aGeometry)
+				else
+					face = extrusion[0]
+					edge = extrusion[1]
+					aGeometry << IfcExtrudedAreaSolid.new(@ifc_exporter, entity, face, edge).record_nr
+					
+					@representation = IfcShapeRepresentation.new(@ifc_exporter, "'Body'", "'SweptSolid'", aGeometry)
+				end
+				
 				aRepresentations << @representation.record_nr
 				return IfcProductDefinitionShape.new(@ifc_exporter, entity, aRepresentations)
 			end
@@ -1456,31 +1489,31 @@ module Brewsky
 				@a_Attributes << nil
 			end
 			def set_guid
-				if @model.get_attribute("IfcBuilding", "GlobalId")
-					return @model.get_attribute("IfcBuilding", "GlobalId")
+				if @model.get_attribute("IfcProduct", "GlobalId")
+					return @model.get_attribute("IfcProduct", "GlobalId")
 				else
 					guid = Brewsky::IFC::new_guid
-					@model.set_attribute("IfcBuilding", "GlobalId", guid)
+					@model.set_attribute("IfcProduct", "GlobalId", guid)
 					return guid
 				end
 			end
 			def set_name
-				if @model.get_attribute("IfcBuilding", "Name")
-					return @model.get_attribute("IfcBuilding", "Name")
+				if @model.get_attribute("IfcProduct", "Name")
+					return @model.get_attribute("IfcProduct", "Name")
 				elsif @ifc_exporter.defaults.get("building_name")
 					name = @ifc_exporter.defaults.get("building_name")
-					@model.set_attribute("IfcBuilding", "Name", name)
+					@model.set_attribute("IfcProduct", "Name", name)
 					return name
 				else
 					return nil
 				end
 			end
 			def set_description
-				if @model.get_attribute("IfcBuilding", "Description")
-					return @model.get_attribute("IfcBuilding", "Description")
+				if @model.get_attribute("IfcProduct", "Description")
+					return @model.get_attribute("IfcProduct", "Description")
 				elsif @ifc_exporter.defaults.get("building_description")
 					description = @ifc_exporter.defaults.get("building_description")
-					@model.set_attribute("IfcBuilding", "Description", description)
+					@model.set_attribute("IfcProduct", "Description", description)
 					return description
 				else
 					return nil
@@ -1658,11 +1691,11 @@ module Brewsky
 			end
 			
 			def set_guid
-				if @model.get_attribute("IfcSite", "GlobalId")
-					return @model.get_attribute("IfcSite", "GlobalId")
+				if @model.get_attribute("IfcProduct", "GlobalId")
+					return @model.get_attribute("IfcProduct", "GlobalId")
 				else
 					guid = Brewsky::IFC::new_guid
-					@model.set_attribute("IfcSite", "GlobalId", guid)
+					@model.set_attribute("IfcProduct", "GlobalId", guid)
 					return guid
 				end
 			end
@@ -1840,10 +1873,10 @@ module Brewsky
 
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_globalId(entity, @entityTypeCc)
+				@a_Attributes << set_globalId(entity, "IfcProduct")
 				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
-				@a_Attributes << set_name(entity, @entityTypeCc, true)
-				@a_Attributes << set_description(entity, @entityTypeCc)
+				@a_Attributes << set_name(entity, "IfcProduct", true)
+				@a_Attributes << set_description(entity, "IfcProduct")
 				@a_Attributes << set_ObjectType
 				@a_Attributes << set_objectPlacement(entity).record_nr
 				@a_Attributes << set_ProductRepresentation(entity).record_nr
@@ -1870,10 +1903,10 @@ module Brewsky
 
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_globalId(entity, @entityTypeCc)
+				@a_Attributes << set_globalId(entity, "IfcProduct")
 				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
-				@a_Attributes << set_name(entity, @entityTypeCc, true)
-				@a_Attributes << set_description(entity, @entityTypeCc)
+				@a_Attributes << set_name(entity, "IfcProduct", true)
+				@a_Attributes << set_description(entity, "IfcProduct")
 				@a_Attributes << set_ObjectType
 				@a_Attributes << set_objectPlacement(entity).record_nr
 				@a_Attributes << set_ProductRepresentation(entity).record_nr
@@ -1903,10 +1936,10 @@ module Brewsky
 
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_globalId(entity, @entityTypeCc)
+				@a_Attributes << set_globalId(entity, "IfcProduct")
 				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
-				@a_Attributes << set_name(entity, @entityTypeCc, true)
-				@a_Attributes << set_description(entity, @entityTypeCc)
+				@a_Attributes << set_name(entity, "IfcProduct", true)
+				@a_Attributes << set_description(entity, "IfcProduct")
 				@a_Attributes << set_ObjectType
 				@a_Attributes << set_objectPlacement(entity).record_nr
 				@a_Attributes << set_ProductRepresentation(entity).record_nr
@@ -1932,10 +1965,10 @@ module Brewsky
 
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_globalId(entity, @entityTypeCc)
+				@a_Attributes << set_globalId(entity, "IfcProduct")
 				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
-				@a_Attributes << set_name(entity, @entityTypeCc, true)
-				@a_Attributes << set_description(entity, @entityTypeCc)
+				@a_Attributes << set_name(entity, "IfcProduct", true)
+				@a_Attributes << set_description(entity, "IfcProduct")
 				@a_Attributes << set_ObjectType
 				@a_Attributes << set_objectPlacement(entity).record_nr
 				@a_Attributes << set_ProductRepresentation(entity).record_nr
@@ -2178,7 +2211,7 @@ module Brewsky
 				aSweptSolid = Array.new
 				projection = get_projection(@planar)
 				loop = projection
-				aCurve2d << IfcPolyline.new(@ifc_exporter, @planar, aPath, false).record_nr
+				aCurve2d << IfcPolyline.new(@ifc_exporter, aPath, false).record_nr
 				aSweptSolid << WscIfcExtrudedAreaSolid.new(@ifc_exporter, @planar, loop, @planar.height?).record_nr
 	#201= IFCSHAPEREPRESENTATION(#51,'Axis','Curve2D',(#197));
 				aRepresentations << IfcShapeRepresentation.new(@ifc_exporter, "'Axis'", "'Curve2D'", aCurve2d).record_nr # SweptSolid Representation
