@@ -21,6 +21,7 @@ module Brewsky
 		Sketchup::require File.join(LIB_PATH, 'DefaultValues.rb')
 		Sketchup::require File.join(LIB_MAIN_PATH, 'guid.rb')
 		Sketchup::require File.join(LIB_MAIN_PATH, 'get_definition.rb')
+		Sketchup::require File.join(LIB_MAIN_PATH, 'ifc_check.rb')
 		Sketchup::require File.join(LIB_PATH, 'Ifc.rb')
 		
 		# basic IFC export class
@@ -46,12 +47,13 @@ module Brewsky
 				@aContainedInBuilding = Array.new
 				
 				# create IfcProject object
-				set_IfcProject
+				@ifcProject = IfcProject.new(self)
 				
 				# create IfcSite object
-				set_IfcSite(@ifcProject)
-				
-				set_IfcBuilding(@ifcSite)
+				@ifcSite = IfcSite.new(self, @ifcProject)
+			
+				# create a building on the site, temporary solution because multiple buildings could be present
+				@ifcBuilding = IfcBuilding.new(self, @ifcSite)
 		
 				path=@model.path.tr("\\", "/")
 				if not path or path==""
@@ -64,52 +66,64 @@ module Brewsky
 				ifc_name = @skpName + ".ifc"
 				ifc_filepath=File.join(@project_path, ifc_name)
 					
-				aEntities = get_entities(entities)
-				if aEntities.length > 0 #if exportable objects have been found, start exporter
-					if self.export(aEntities, ifc_filepath)
+				#aEntities = get_entities(entities)
+				#if aEntities.length > 0 #if exportable objects have been found, start exporter
+					if self.export(ifc_filepath)
 						UI.messagebox("IFC Export completed:\n" + ifc_filepath + "\n")
 					else
 						UI.messagebox("IFC Exporter:\n\nExport failed.\n")
 					end
-				else
-					UI.messagebox("IFC Exporter:\n\nNo entities to export to IFC.\nExport failed.\n")
-				end
+				#else
+				#	UI.messagebox("IFC Exporter:\n\nNo entities to export to IFC.\nExport failed.\n")
+				#end
 			end
 			
-			def export(aEntities, location)
+			# main exporter method
+			def export(location, aSuEntities=nil)
 				Sketchup.set_status_text("IFCExporter: Exporting IFC entities...") # inform user that ifc-export is running
 		
 				ifc_filepath = location
 				export_base_file = File.basename(@model.path, ".skp") + ".ifc"
 				
-				# create empty site container object
-				container = IfcRelContainedInSpatialStructure.new(self)
-				
-				aEntities.each do |entity|
-				 # entity.ifc_export(self)
-				
-					
-					subtype = entity.get_attribute "IfcProduct", "subtype"
-					
-					case subtype
-					when "IfcWall"
-						ifcEntity = IfcWall.new(self, entity)
-					when "IfcSlab"
-						ifcEntity = IfcSlab.new(self, entity)
-					when "IfcBeam"
-						ifcEntity = IfcBeam.new(self, entity)
-					when "IfcColumn"
-						ifcEntity = IfcColumn.new(self, entity)
-					else
-						ifcEntity = IfcBuildingElementProxy.new(self, entity)
-					end
-				 
-					collect_materials(entity, ifcEntity.record_nr)
-					collect_layers(entity, ifcEntity)
+				if aSuEntities.nil?
+					aSuEntities = Sketchup.active_model.entities
 				end
+
+
+      
+        ###################
+        h_entities = self.get_su_entities(Sketchup.active_model)
+        self.set_ifc_entities(h_entities, @ifcBuilding)
+
+				# unnecesary step: collecting entities twice
+				#aIfcEntities = Array.new
+				#self.get_entities(aSuEntities, @ifcBuilding)#, aIfcEntities)
+				
+				#aIfcEntities.each do |ifcEntity|
+				
+				#aEntities.each do |entity|
+				 ## entity.ifc_export(self)
+				
+					
+					#subtype = entity.get_attribute "IfcProduct", "subtype"
+					
+					#case subtype
+					#when "IfcWall"
+						#ifcEntity = IfcWall.new(self, entity)
+					#when "IfcSlab"
+						#ifcEntity = IfcSlab.new(self, entity)
+					#when "IfcBeam"
+						#ifcEntity = IfcBeam.new(self, entity)
+					#when "IfcColumn"
+						#ifcEntity = IfcColumn.new(self, entity)
+					#else
+						#ifcEntity = IfcBuildingElementProxy.new(self, entity)
+					#end
+				 
+				#end
 				
 				# fill site container object with ifc entities
-				container.fill()
+				#container.fill()
 				
 				# fill the materials with attached objects
 				@hMaterials.each_value do |ifcRelAssociatesMaterial|
@@ -125,44 +139,226 @@ module Brewsky
 				File.open(ifc_filepath, 'w') do |file|
 					file.write(self.ifc)
 				end
-			end
+			end # export
+      
+      def connected_check(aEntities)
+        aSets = Hash.new
+        
+        def self.get_connected(aEntities, aSets)
+          unless aEntities.length == 0
+            aConnected = aEntities[0].all_connected
+            aSets[aConnected] = nil
+            aEntities = aEntities - aConnected
+            self.get_connected(aEntities, aSets)
+          end
+        end
+        
+        self.get_connected(aEntities, aSets)
+        return aSets
+      end
+        
+      # create a Hash from all SU entities
+      def get_su_entities(su_parent)
+        h = Hash.new
+        a_faces = Array.new
+        if su_parent.is_a?(Sketchup::ComponentInstance)
+          entities = su_parent.definition.entities
+        else
+          entities = su_parent.entities
+        end
+        
+        entities.each do |su_entity|
+          if su_entity.is_a?(Sketchup::Group) || su_entity.is_a?(Sketchup::ComponentInstance)
+            h[su_entity] = get_su_entities(su_entity)
+          elsif su_entity.is_a?(Sketchup::Face)
+            a_faces << su_entity
+          end
+        end
+        h.merge!(self.connected_check(a_faces))
+        return h
+      end # get_su_entities
+      
+      # create IFC entities from Hash
+      def set_ifc_entities(h_entities, ifc_parent)
+        h_entities.each do |ent, children|
+            
+          unless ent.is_a?(Array)
+            subtype = ent.get_attribute "IfcProduct", "SubType"
+          end
+          
+          if children.nil? || children.length == 1
+            assembly = false
+          else
+            assembly = true
+          end
+          
+          case subtype
+          when "IfcWall"
+            ifc_entity = IfcWall.new(self, ifc_parent, ent, assembly)
+          when "IfcSlab"
+            ifc_entity = IfcSlab.new(self, ifc_parent, ent, assembly)
+          when "IfcBeam"
+            ifc_entity = IfcBeam.new(self, ifc_parent, ent, assembly)
+          when "IfcColumn"
+            ifc_entity = IfcColumn.new(self, ifc_parent, ent, assembly)
+          else
+            ifc_entity = IfcBuildingElementProxy.new(self, ifc_parent, ent, nil, assembly)
+          end
+          
+          self.collect_layers(ent, ifc_entity)
+            
+          if assembly == false
+            self.collect_materials(ent, ifc_entity)            
+          else
+            self.set_ifc_entities(children, ifc_entity)
+          end
+        end
+      end # set_ifc_entities
+			
 			def collect_materials(entity, ifcEntity)
-				unless entity.material.nil?
-					unless @hMaterials.has_key?(entity.material)
-						@hMaterials[entity.material] = IfcRelAssociatesMaterial.new(self, IfcMaterial.new(self, entity.material))
-					end
-					@hMaterials[entity.material].add(ifcEntity)
-				end
+				unless entity.nil? || entity.is_a?(Array)
+          unless @hMaterials.has_key?(entity.material)
+            ifc_material = IfcMaterial.new(self, entity.material)
+           # IfcMaterialDefinitionRepresentation.new(self, ifc_material, entity.material)
+            @hMaterials[entity.material] = IfcRelAssociatesMaterial.new(self, ifc_material)
+          end
+          @hMaterials[entity.material].add(ifcEntity)
+        end
 			end
 			def collect_layers(entity, ifcEntity)
-				unless @hLayers.has_key?(entity.layer)
-					@hLayers[entity.layer] = IfcPresentationLayerAssignment.new(self, entity.layer)
-				end
-				@hLayers[entity.layer].add(ifcEntity)
+				unless entity.nil? || entity.is_a?(Array)
+          #if entity.is_a?(Sketchup::Entities)
+          #  entity = entity.parent
+          #end
+          unless @hLayers.has_key?(entity.layer)
+            @hLayers[entity.layer] = IfcPresentationLayerAssignment.new(self, entity.layer)
+          end
+          @hLayers[entity.layer].add(ifcEntity)
+        end
 			end
-			def get_entities(entities)
-				if entities.nil?
-					entities = Sketchup.active_model.entities
-				end
-				ifc_entities = Array.new
-				entities.each do |entity|
-					if entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
-						if entity.manifold?
-							ifc_entities << entity
+			#def get_entities(entities)
+				#if entities.nil?
+					#entities = Sketchup.active_model.entities
+				#end
+				#ifc_entities = Array.new
+				#entities.each do |entity|
+					#if entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
+						#if entity.manifold?
+							#ifc_entities << entity
+						#end
+					#end
+				#end
+				#return ifc_entities
+			#end
+			
+			# recursively walk through the model and return found IFC entities
+			def get_entities(aSuEntities, parent)#, aIfcEntities)
+				
+				aEdges = Array.new
+				aFaces = Array.new
+				#aComponents = Array.new
+				aIfcEntities = Array.new
+				
+				# filter types of entities
+				aSuEntities.each do |entity|
+					ifcEntity = nil
+					case entity
+					when Sketchup::Group
+						ifcEntity = Brewsky::IfcExport::ifc_check(entity)
+						if ifcEntity.nil?
+							ifcEntity = IfcElement.new(self, parent, entity)
 						end
+						aIfcEntities << ifcEntity
+						
+						# find nested entities
+						get_entities(entity.entities, ifcEntity)#, aIfcEntities)
+					when Sketchup::ComponentInstance
+						ifcEntity = Brewsky::IfcExport::ifc_check(entity)
+						if ifcEntity.nil?
+							ifcEntity = IfcElement.new(self, parent, entity)
+						end
+						aIfcEntities << ifcEntity
+						
+						# find nested entities
+						get_entities(entity.definition.entities, ifcEntity)#, aIfcEntities)
+					when Sketchup::Edge
+						aEdges << entity
+					when Sketchup::Face
+						aFaces << entity
 					end
+					#unless ifcEntity.nil?
+					#	collect_materials(entity, ifcEntity.record_nr)
+					#	collect_layers(entity, ifcEntity)
+					#end
 				end
-				return ifc_entities
-			end
+				
+				
+				# create IfcProducts from "loose" geometry
+				# if more than 1 connected group of objects: create products
+				products = self.connected_check(aFaces)
+				#if products.length > 1
+					#products.each do |product|
+						#IfcElement.new(self, parent, product)
+					#end
+				#elsif products.length == 1 && aComponents.length != 0
+					#IfcElement.new(self, parent, products[0])
+				#elsif products.length == 1 && aComponents.length == 0
+					
+					############ dit werkt alleen bij een ifcproduct!!!!!!
+					
+					#if parent.is_a? IfcProduct 
+						#parent.set_ProductRepresentation(products[0])
+					#else
+						#IfcElement.new(self, parent, products[0])
+					#end
+				#end
+				
+				if products.length == 1 && aIfcEntities.length == 0
+					
+					parent.set_ProductRepresentation(products[0])
+					#parent.set_ObjectPlacement(parent)
+					
+					#collect_materials(products[0][0].parent, parent.record_nr)
+					#collect_layers(products[0][0].parent, parent)
+					
+				else
+					
+					products.each do |product|
+						ifcEntity = IfcElement.new(self, parent, product)
+						ifcEntity.set_ProductRepresentation(product)
+						aIfcEntities << ifcEntity
+					
+						#collect_materials(product[0].parent, parent.record_nr)
+						#collect_layers(product[0].parent, parent)
+					end
+					
+				end
+				return aIfcEntities
+			end # get_entities
+			
+			# function to split a set of entities(edges and faces) into sets of connected entities
+			# input: Array of entities
+			# output: Array with sub-arrays containing connected entities
+			#def connected_check(aEntities)
+				#aSets = Array.new
+				
+				#def get_connected(aEntities, aSets)
+					#unless aEntities.length == 0
+						#aConnected = aEntities[0].all_connected
+						#aSets << aConnected
+						#aEntities = aEntities - aConnected
+						#get_connected(aEntities, aSets)
+					#end
+				#end
+				
+				#self.get_connected(aEntities, aSets)
+				#return aSets
+			#end
 			def add(entity)
 				new_record_nr = @a_Ifc.length + 1
 				new_record_nr = "#" + new_record_nr.to_s
 				entity.record_nr=(new_record_nr)
 				@a_Ifc << entity
-			end
-			
-			def set_IfcProject()
-				@ifcProject = IfcProject.new(self)
 			end
 			
 			def set_IfcOwnerHistory()
@@ -186,33 +382,6 @@ module Brewsky
 					@ifcGeometricRepresentationContext = IfcGeometricRepresentationContext.new(self)
 				end
 				return @ifcGeometricRepresentationContext
-			end
-			
-			def set_IfcSite(project)
-				if @ifcSite.nil?
-					@ifcSite = IfcSite.new(self)
-					# IFCRELAGGREGATES('1hGct2v1LFjuexLy7xe$Mo', #2, 'ProjectContainer', 'ProjectContainer for Sites', #1, (#23));
-					name = "'ProjectContainer'"
-					description = "'ProjectContainer for Sites'"
-					IfcRelAggregates.new(self, name, description, project, @ifcSite)
-				end
-				return @ifcSite
-			end
-			
-			# create a building on the site, temporary solution because multiple buildings could be present
-			def set_IfcBuilding(site)
-				if @ifcBuilding.nil?
-					@ifcBuilding = IfcBuilding.new(self)
-					# IFCRELAGGREGATES('1_M0EvY2z24AX0l7nBeVj1', #2, 'SiteContainer', 'SiteContainer For Buildings', #23, (#29));
-					name = "'SiteContainer'"
-					description = "'SiteContainer For Buildings'"
-					IfcRelAggregates.new(self, name, description, site, @ifcBuilding)
-				end
-				return @ifcBuilding
-			end
-			
-			def add_to_building(ifc_entity)
-				@aContainedInBuilding << ifc_entity.record_nr
 			end
 			
 			# returns a string containing the full IFC file
@@ -246,7 +415,7 @@ module Brewsky
 				
 				return "ISO-10303-21;
 HEADER;
-FILE_DESCRIPTION (('ViewDefinition [CoordinationView]'), '2;1');
+FILE_DESCRIPTION( ('ViewDefinition [CoordinationView_V2.0]'),'2;1');
 FILE_NAME ('" + @skpName + ".ifc', '" + @timestamp + "', ('" + @author + "'), ('" + @organization + "'), '" + @preprocessor_version + "', '" + @originating_system + "', '" + @authorization + "');
 FILE_SCHEMA (('IFC2X3'));
 ENDSEC;
@@ -301,6 +470,23 @@ END-ISO-10303-21;
 				sList = sList + ")"
 				return sList
 			end
-		end
+      
+			
+			# function to figure out if an Array of Edges makes solid objects
+			# input: Array of Edges
+			# output: true or false
+			def solid_check(aEdges)
+				puts "solidcheck"
+				if aEdges.length == 0
+					return false
+				end
+				aEdges.each do |edge|
+					if edge.faces.length != 2
+						return false
+					end
+				end
+				return true
+			end # solid_check
+		end # IfcExporter
 	end # module IfcExport
 end # module Brewsky

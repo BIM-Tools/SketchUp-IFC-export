@@ -66,7 +66,8 @@ module Brewsky
 			end # get_default
 			
 			def set_name(entity=nil, ifc_type=nil, su_name=nil)
-				return nil if entity.nil?
+				return nil if entity.nil? || entity.is_a?(Array) # if loose group of geometry
+        if ifc_type.nil? then ifc_type="IfcProduct" end
 				return nil unless ifc_type.is_a? String
 				name = nil
 				
@@ -79,7 +80,13 @@ module Brewsky
 						if self.get_default(ifc_type, 'Name').nil?
 							return nil
 						else
-							return "'" + self.get_default(ifc_type, 'Name') + "'"
+							default = self.get_default(ifc_type, 'Name')
+              if default.nil?
+                return nil
+              else
+                entity.set_attribute(ifc_type, 'Name', default)
+                return "'" + default + "'"
+              end
 						end
 					else
 						return "'" + name + "'"
@@ -90,7 +97,7 @@ module Brewsky
 			end # set_name
 			
 			def set_description(entity=nil, ifc_type=nil, su_description=nil)
-				return nil if entity.nil?
+				return nil if entity.nil? || entity.is_a?(Array) # if loose group of geometry
 				return nil unless ifc_type.is_a? String
 				description = nil
 				
@@ -104,7 +111,13 @@ module Brewsky
 						if self.get_default(ifc_type, 'Description').nil?
 							return nil
 						else
-							return "'" + self.get_default(ifc_type, 'Description') + "'"
+							default = self.get_default(ifc_type, 'Description')
+              if default.nil?
+                return nil
+              else
+                entity.set_attribute(ifc_type, 'Description', default)
+                return "'" + default + "'"
+              end
 						end
 					else
 						return "'" + description + "'"
@@ -114,6 +127,96 @@ module Brewsky
 				end
 			end # set_description
 		end # IfcBase
+		
+		# creates an IFCLIST
+		# input: array of record_nr's or a single record_nr
+		class IfcList
+			def initialize(init_content=nil)
+				if init_content.is_a?(Array)
+					@aList = init_content
+				else
+					@aList = Array.new
+					unless init_content == nil
+						@aList << init_content
+					end
+				end
+			end
+			def add(record_nr)
+				@aList << record_nr
+			end
+			
+			# returns the formatted list
+			def get
+				sList = "("
+				@aList.each_index do |index|
+        
+					# temporary catch for strings
+          if @aList[index].is_a?(String)
+            sList = sList + @aList[index]
+          else
+            sList = sList + @aList[index].record_nr
+          end
+          
+					unless @aList.length - 1 == index
+						sList = sList + ","
+					end
+				end
+				sList = sList + ")"
+				return sList
+			end
+		end # IfcList
+    
+		class IfcDimensionCount
+			attr_reader :dim
+			def initialize(dim=3)
+        set_dim(dim)
+      end # initialize
+      def set_dim(dim)
+        if dim.is_a?(Integer) && dim > 0 && dim <= 3
+          @dim = dim
+        end
+      end # set_dim
+		end # IfcDimensionCount
+    
+		class IfcLengthMeasure
+			attr_reader :length
+			def initialize(length)
+        set_length(length)
+      end # initialize
+      def set_length(length)
+        if length.is_a?(Float)
+          @length = length
+        end
+      end # set_dim
+      
+      # returns length as a string
+      def string
+        sprintf('%.8f', @length.to_m).sub(/0{1,8}$/, '')
+      end
+		end # IfcLengthMeasure
+    
+    class IfcLabel
+			attr_reader :label
+			def initialize(string)
+        set_label(string)
+      end # initialize
+      def set_label(string)
+        if label.is_a?(String)
+          @label = string
+        elsif string.to_s
+          @label = string.to_s
+        else
+          @label = nil
+        end
+      end # set_label
+      
+      # returns a formatted string
+      def string
+        return "'" + @label + "'"
+      end
+		end # IfcLabel
+    
+    
 
 		#7 = IFCUNITASSIGNMENT((#8, #9, #10, #11, #15, #16, #17, #18, #19));
 		#8 = IFCSIUNIT(*, .LENGTHUNIT., $, .METRE.);
@@ -299,19 +402,29 @@ module Brewsky
 		end
 		
 		class IfcRoot < IfcBase
-			attr_accessor :globalId, :name, :description, :record_nr#, :ownerHistory        
+			attr_accessor :globalId, :name, :description, :record_nr#, :ownerHistory
 			def set_globalId(entity, ifc_type)
-				if entity.get_attribute(ifc_type, "GlobalId")
-					return "'" + entity.get_attribute(ifc_type, "GlobalId") + "'"
+      
+        #puts method(:set_globalId).inspect.split("::").last.split(")").first
+      
+        #puts __method__.to_s.inspect.split("::").last.split(")").first
+        #puts caller[0]=~/`(.*?)'/
+      
+				if entity.nil? || entity.is_a?(Array) # if loose group of geometry
+					@globalId = Brewsky::IFC::new_guid
+					return "'" + @globalId + "'"
+				elsif entity.get_attribute(ifc_type, "GlobalId")
+					@globalId = entity.get_attribute(ifc_type, "GlobalId")
+					return "'" + @globalId + "'"
 				else
-					guid = Brewsky::IFC::new_guid
-					entity.set_attribute(ifc_type, "GlobalId", guid)
-					return "'" + guid + "'"
+					@globalId = Brewsky::IFC::new_guid
+					unless entity.nil?
+						entity.set_attribute(ifc_type, "GlobalId", @globalId)
+					end
+					return "'" + @globalId + "'"
 				end
 			end
-
 		end
-			
 		
 		class IfcObject < IfcRoot
 			#Attribute	      Type	                            Defined By
@@ -354,13 +467,14 @@ module Brewsky
 			# Phase	                  IfcLabel (STRING)	                        IfcProject
 			# RepresentationContexts	SET OF IfcRepresentationContext (ENTITY)	IfcProject
 			# UnitsInContext	        IfcUnitAssignment (ENTITY)	              IfcProject
-			attr_accessor :record_nr, :ifcOwnerHistory
+			attr_accessor :record_nr, :ifcOwnerHistory, :representationContexts
 			def initialize(ifc_exporter)
 				init_common(ifc_exporter)
+				
 				@ifcOwnerHistory = IfcOwnerHistory.new(@ifc_exporter)
 				ifcUnitAssignment = IfcUnitAssignment.new(@ifc_exporter)
-				aIfcGeometricRepresentationContext = Array.new
-				aIfcGeometricRepresentationContext << @ifc_exporter.set_IfcGeometricRepresentationContext.record_nr#IfcGeometricRepresentationContext.new(@ifc_exporter, @model).record_nr
+				@representationContexts = Array.new
+				@representationContexts << @ifc_exporter.set_IfcGeometricRepresentationContext.record_nr#IfcGeometricRepresentationContext.new(@ifc_exporter, @model).record_nr
 
 				# "local" IFC array
 				@a_Attributes = Array.new
@@ -371,10 +485,18 @@ module Brewsky
 				@a_Attributes << nil
 				@a_Attributes << nil
 				@a_Attributes << nil
-				@a_Attributes << @ifc_exporter.ifcList(aIfcGeometricRepresentationContext)
+				@a_Attributes << @ifc_exporter.ifcList(@representationContexts)
 				@a_Attributes << ifcUnitAssignment.record_nr
 			end
 			
+			# add objects for IfcRelAggregates
+			def add_RelatedObject(child)
+				if @ifcRelAggregates
+					@ifcRelAggregates.add_RelatedObject(child)
+				else
+					@ifcRelAggregates = IfcRelAggregates.new(@ifc_exporter, "'ProjectContainer'", "'ProjectContainer for Sites'", self, child)
+				end
+			end
 		end
 		
 		#2 = IFCOWNERHISTORY(#3, #6, $, .ADDED., $, $, $, 1217620436);
@@ -431,6 +553,7 @@ module Brewsky
 		
 		#4 = IFCPERSON('ID001', 'Bonsma', 'Peter', $, $, $, $, $);
 		class IfcPerson < IfcBase
+			attr_accessor :iD, :familyName, :givenName, :MiddleNames, :PrefixTitles, :SuffixTitles, :Roles, :Addresses
 			# Attribute	    Type	                        Defined By
 			# ID	          IfcIdentifier (STRING)	      IfcPerson (optional)
 			# FamilyName	  IfcLabel (STRING)	            IfcPerson (optional)
@@ -440,24 +563,29 @@ module Brewsky
 			# SuffixTitles	LIST OF IfcLabel (STRING)	    IfcPerson (optional)
 			# Roles	        LIST OF IfcActorRole (ENTITY)	IfcPerson (optional)
 			# Addresses	    LIST OF IfcAddress (ENTITY)	  IfcPerson (optional)
-			attr_accessor :record_nr
 			def initialize(ifc_exporter)
-				@ifc_exporter = ifc_exporter
-				@model = ifc_exporter.model
-				@entityType = "IFCPERSON"
-				@ifc_exporter.add(self)
+				init_common(ifc_exporter)
 				
+        set_FamilyName
+        set_GivenName
+        
 				# "local" IFC array
 				@a_Attributes = Array.new
 				@a_Attributes << nil
-				@a_Attributes << nil
-				@a_Attributes << nil
+				@a_Attributes << @familyName.string
+				@a_Attributes << @givenName.string
 				@a_Attributes << nil
 				@a_Attributes << nil
 				@a_Attributes << nil
 				@a_Attributes << nil
 				@a_Attributes << nil
 			end
+      def set_FamilyName
+        @familyName = IfcLabel.new(get_default(@entityTypeCc, "FamilyName"))
+      end
+      def set_GivenName
+        @givenName = IfcLabel.new(get_default(@entityTypeCc, "GivenName"))
+      end
 		end
 		
 		#5 = IFCORGANIZATION($, 'TNO', 'TNO Building Innovation', $, $);
@@ -518,17 +646,30 @@ module Brewsky
 			# RelatedObjects	SET OF IfcObjectDefinition (ENTITY)	IfcRelDecomposes
 			attr_accessor :record_nr
 					#IfcRelAggregates.new(self, name, description, site, @ifcBuilding)
-			def initialize(ifc_exporter, name, description, relating, related)
+			def initialize(ifc_exporter, name, description, relating, related=nil)
 				init_common(ifc_exporter)
+				
+				@relatedObjects = IfcList.new
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_globalId(@model, @entityTypeCc)
+				@a_Attributes << set_globalId(nil, @entityTypeCc)
 				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
 				@a_Attributes << name
 				@a_Attributes << description
 				@a_Attributes << relating.record_nr
-				@a_Attributes << @ifc_exporter.ifcList(related.record_nr)
+				@a_Attributes << @relatedObjects.get
+				
+				unless related.nil?
+					add_RelatedObject(related)
+				end
+				
+			end
+			def add_RelatedObject(child)
+				@relatedObjects.add(child.record_nr)
+				
+				# temporary solution update list contents
+				@a_Attributes[5] = @relatedObjects.get
 			end
 		end
 
@@ -540,12 +681,14 @@ module Brewsky
 			# ExtrudedDirection	IfcDirection (ENTITY)	          IfcExtrudedAreaSolid
 			# Depth	            IfcPositiveLengthMeasure (REAL)	IfcExtrudedAreaSolid
 			attr_accessor :sweptArea, :position, :extrudedDirection, :depth, :record_nr, :entityType
-			def initialize(ifc_exporter, bt_entity, face, edge=nil)
+			def initialize(ifc_exporter, face, edge=nil)
 				init_common(ifc_exporter)
 				
 				#offset = @bt_entity.offset * -1
 				#vector = Geom::Vector3d.new 0,0,offset
-				@transformation = Geom::Transformation.new#.translation vector
+				#@transformation = Geom::Transformation.new#.translation vector
+        
+        @transformation = Geom::Transformation.new(face.vertices[0], face.normal) 
 				
 				#@transformation = @bt_entity.geometry.transformation
 				
@@ -565,16 +708,17 @@ module Brewsky
 		#90 = IFCCARTESIANPOINT((5., 0.));
 		#91 = IFCCARTESIANPOINT((0., 0.));
 				if face.loops.length == 1
-					return IfcArbitraryClosedProfileDef.new(@ifc_exporter, @bt_entity, face).record_nr
+					return IfcArbitraryClosedProfileDef.new(@ifc_exporter, face, @transformation.inverse).record_nr
 				else
-					return IfcArbitraryProfileDefWithVoids.new(@ifc_exporter, @bt_entity, face).record_nr
+					return IfcArbitraryProfileDefWithVoids.new(@ifc_exporter, face, @transformation.inverse).record_nr
 				end
 			end
 			def set_Position
 				return IfcAxis2Placement3D.new(@ifc_exporter, @transformation).record_nr
 			end
 			def set_ExtrudedDirection(edge)
-				vec = edge.line[1]#Geom::Vector3d.new(0,0,1) #loop.face.normal.transform @transformation.inverse#@transformation.zaxis#.reverse #
+				vec = edge.line[1].transform! @transformation.inverse
+        #Geom::Vector3d.new(0,0,1) #loop.face.normal.transform @transformation.inverse#@transformation.zaxis#.reverse #
 				return IfcDirection.new(@ifc_exporter, vec).record_nr
 			end
 			def set_Depth(edge)
@@ -594,40 +738,50 @@ module Brewsky
 			# Attribute	    Type	                          Defined By
 			# Outer	        IfcClosedShell (ENTITY)	        IfcManifoldSolidBrep
 			attr_accessor :record_nr
-			def initialize(ifc_exporter, entity)
+			def initialize(ifc_exporter, entities)
 				
 				init_common(ifc_exporter)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_IfcClosedShell(entity)
+				@a_Attributes << set_IfcClosedShell(entities)
 			end
-			def set_IfcClosedShell(entity)
-				return IfcClosedShell.new(@ifc_exporter, entity).record_nr
+			def set_IfcClosedShell(entities)
+				return IfcClosedShell.new(@ifc_exporter, entities).record_nr
 			end
 		end
 
-		# entity must be of the type group component instance
-		#106= IFCCLOSEDSHELL((#110,#153,#172,#207,#218,#229,#240,#251,#262,#273));
-		class IfcClosedShell < IfcBase
+		class IfcFaceBasedSurfaceModel < IfcBase
+			# Attribute   Type	                              Defined By
+			# FbsmFaces   SET OF IfcConnectedFaceSet (ENTITY) IfcFaceBasedSurfaceModel
+			attr_reader :sbsmBoundary
+			def initialize(ifc_exporter, entities)
+				init_common(ifc_exporter)
+        
+        @sbsmBoundary = IfcList.new(IfcOpenShell.new(@ifc_exporter, entities).record_nr)
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << @sbsmBoundary.get
+			end
+		end
+    
+		class IfcConnectedFaceSet < IfcBase
 			# Attribute	    Type	                          Defined By
 			# CfsFaces      SET OF IfcFace (ENTITY)	        IfcConnectedFaceSet
-			
-			attr_accessor :record_nr
-			def initialize(ifc_exporter, entity)
+			attr_accessor :cfsFaces
+			def initialize(ifc_exporter, entities)
 				init_common(ifc_exporter)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_IfcFaces(entity)
+				@a_Attributes << set_IfcFaces(entities)
 			end
-			def set_IfcFaces(entity)
+			def set_IfcFaces(entities)
 				hVertices = Hash.new
 				aFaces = Array.new
 				
-				# in this case we need a definition, not an instance
-				definition = Brewsky::IFC::definition(entity)
-				definition.entities.each do |ent|
+				entities.each do |ent|
 					if ent.is_a? Sketchup::Face
 						aFaces << IfcFace.new(@ifc_exporter, ent, hVertices).record_nr
 					end
@@ -635,6 +789,32 @@ module Brewsky
 				return @ifc_exporter.ifcList(aFaces)
 			end
 		end
+    
+		class IfcClosedShell < IfcConnectedFaceSet
+			# Attribute	    Type	                          Defined By
+			# CfsFaces      SET OF IfcFace (ENTITY)	        IfcConnectedFaceSet
+			attr_reader :cfsFaces
+			def initialize(ifc_exporter, entities)
+				init_common(ifc_exporter)
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << set_IfcFaces(entities)
+			end
+		end
+
+		class IfcOpenShell < IfcConnectedFaceSet
+			# Attribute	    Type	                          Defined By
+			# CfsFaces      SET OF IfcFace (ENTITY)	        IfcConnectedFaceSet
+			attr_reader :cfsFaces
+			def initialize(ifc_exporter, entities)
+				init_common(ifc_exporter)
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << set_IfcFaces(entities)
+			end
+		end # IfcOpenShell
 
 		# entity must be of the type face
 		#153= IFCFACE((#157));
@@ -755,15 +935,18 @@ module Brewsky
 			# ProfileName	IfcLabel (STRING)					IfcProfileDef
 			# OuterCurve	IfcCurve (ENTITY)					IfcArbitraryClosedProfileDef
 			attr_accessor :record_nr, :entityType
-			def initialize(ifc_exporter, entity, face)
+			def initialize(ifc_exporter, face, transformation=nil)
 				init_common(ifc_exporter)
 				loop = face.outer_loop
+        
+        # WR1 : OuterCurve.Dim = 2;
+        dim = 2
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
 				@a_Attributes << ".AREA."
 				@a_Attributes << nil
-				@a_Attributes << IfcPolyline.new(@ifc_exporter, loop).record_nr
+				@a_Attributes << IfcPolyline.new(@ifc_exporter, loop, true, dim, transformation).record_nr
 			end
 		end
 		
@@ -774,16 +957,20 @@ module Brewsky
 			# OuterCurve	IfcCurve (ENTITY)					IfcArbitraryClosedProfileDef
 			# InnerCurves	SET OF IfcCurve (ENTITY)	IfcArbitraryProfileDefWithVoids
 			attr_accessor :record_nr, :entityType
-			def initialize(ifc_exporter, entity, face)
+			def initialize(ifc_exporter, face, transformation=nil)
 				init_common(ifc_exporter)
 				loop = face.outer_loop
 				inner_loops = get_inner_loops(face)
+        @transformation = transformation
+        
+        # WR1 : OuterCurve.Dim = 2;
+        @dim = 2
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
 				@a_Attributes << ".AREA."
 				@a_Attributes << nil
-				@a_Attributes << IfcPolyline.new(@ifc_exporter, loop).record_nr
+				@a_Attributes << IfcPolyline.new(@ifc_exporter, loop, true, @dim, @transformation).record_nr
 				@a_Attributes << ifc_exporter.ifcList(inner_loops)
 			end
 			def get_inner_loops(face)
@@ -791,7 +978,7 @@ module Brewsky
 				inner_loops = Array.new
 				face.loops.each do |loop|
 					unless loop == outer_loop
-						inner_loops << IfcPolyline.new(@ifc_exporter, loop).record_nr
+						inner_loops << IfcPolyline.new(@ifc_exporter, loop, true, @dim, @transformation).record_nr
 					end
 				end
 				return inner_loops
@@ -800,9 +987,13 @@ module Brewsky
 		
 		class IfcPolyline < IfcBase
 			attr_accessor :record_nr, :entityType
-			def initialize(ifc_exporter, loop, closed=true)
+			def initialize(ifc_exporter, loop, closed=true, dim=3, transformation=nil)
 				init_common(ifc_exporter)
 				@loop = loop
+        
+        if transformation.nil?
+          transformation = Geom::Transformation.new
+        end
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
@@ -814,7 +1005,8 @@ module Brewsky
 				#verts.each do |vert|
 					#position = vert.position#.transform! t
 				@loop.vertices.each do |vertex|
-					ifcCartesianPoint = IfcCartesianPoint.new(@ifc_exporter, vertex.position)
+					point = vertex.position.transform! transformation
+          ifcCartesianPoint = IfcCartesianPoint.new(@ifc_exporter, point, dim)
 					pts << ifcCartesianPoint.record_nr
 				end
 
@@ -834,82 +1026,100 @@ module Brewsky
 		end
 		
 		class IfcLocalPlacement < IfcObjectPlacement
-			def initialize(ifc_exporter, transformation_parent=nil, transformation=nil)
-				@ifc_exporter = ifc_exporter
-				@entityType = "IFCLOCALPLACEMENT"
-				@ifc_exporter.add(self)
+      attr_reader :placementRelTo, :relativePlacement
+      # Attribute	Type	  Defined By
+      # PlacementRelTo	  IfcObjectPlacement (ENTITY)	IfcLocalPlacement
+      # RelativePlacement	IfcAxis2Placement (SELECT)	IfcLocalPlacement
+			def initialize(ifc_exporter, ifcObjectPlacement=nil, su_transformation=nil)
+				init_common(ifc_exporter)
+        
+        
+        set_relativePlacement(su_transformation)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_placement(transformation_parent)
-				@a_Attributes << set_placement(transformation)
+				@a_Attributes << set_placementRelTo(ifcObjectPlacement)
+				@a_Attributes << @relativePlacement.record_nr
 			end
-			
-			# this should link to the placement of the parent object
-			# for simplicity returns origin
-			# ERROR: Field PlacementRelTo of IfcLocalPlacement cannot contain a IfcAxis2Placement3D
-			def set_placement(transformation)
-				if transformation.nil?
-					return nil
-				else
-					return IfcAxis2Placement3D.new(@ifc_exporter, transformation).record_nr
-				end
+      
+      def set_placementRelTo(ifcObjectPlacement)
+        @placementRelTo = ifcObjectPlacement
+        if @placementRelTo.nil?
+          return @placementRelTo
+        else
+          return @placementRelTo.record_nr
+        end
+      end
+
+			def set_relativePlacement(su_transformation)
+        @relativePlacement = IfcAxis2Placement3D.new(@ifc_exporter, su_transformation)
 			end
 		end
 		
 		class IfcPlacement < IfcBase
 			attr_accessor :location
 			def initialize(ifc_exporter, bt_entity)
-				@entityType = "IFCPLACEMENT"
-				ifc_exporter.add(self)
+				init_common(ifc_exporter)
 			end
 		end
 		
 		class IfcAxis2Placement3D < IfcPlacement
 			attr_accessor :axis, :refDirection
-			def initialize(ifc_exporter, transformation)
-				@ifc_exporter = ifc_exporter
-				@entityType = "IFCAXIS2PLACEMENT3D"
-				@ifc_exporter.add(self)
+			def initialize(ifc_exporter, su_transformation=nil)
+				init_common(ifc_exporter)
+        
+				if su_transformation.nil?
+					su_transformation = Geom::Transformation.new
+				end
 					
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_Location(transformation).record_nr
-				@a_Attributes << set_Axis(transformation).record_nr
-				@a_Attributes << set_RefDirection(transformation).record_nr # ?????????????
+				@a_Attributes << set_Location(su_transformation).record_nr
+				@a_Attributes << set_Axis(su_transformation).record_nr
+				@a_Attributes << set_RefDirection(su_transformation).record_nr # ?????????????
 			end
-			def set_Location(transformation)
-				@location = transformation.origin #	IfcCartesianPoint
+			def set_Location(su_transformation)
+				@location = su_transformation.origin #	IfcCartesianPoint
 				return IfcCartesianPoint.new(@ifc_exporter, @location)
 			end  
-			def set_Axis(transformation)
-				vec = transformation.zaxis # IfcDirection
+			def set_Axis(su_transformation)
+				vec = su_transformation.zaxis # IfcDirection
 				return IfcDirection.new(@ifc_exporter, vec)
 			end  
-			def set_RefDirection(transformation)
-				vec = transformation.xaxis # ??? #	IfcDirection  
+			def set_RefDirection(su_transformation)
+				vec = su_transformation.xaxis # ??? #	IfcDirection  
 				return IfcDirection.new(@ifc_exporter, vec)
 			end
 		end
 		
 		class IfcCartesianPoint < IfcBase
-			attr_accessor :coordinates
-			def initialize(ifc_exporter, point3d)
+			attr_reader :coordinates, :dim
+			def initialize(ifc_exporter, point3d, dim=3)
 				init_common(ifc_exporter)
-				@coordinates = point3d
+        @dim = IfcDimensionCount.new(dim)
+        
+        set_coordinates(point3d, @dim)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				s_Ifc = "(" # LIST
-				s_Ifc = s_Ifc + @ifc_exporter.ifcLengthMeasure(@coordinates.x) # should end with 0. : IfcLengthMeasure  # LIST
-				s_Ifc = s_Ifc + ", "  # LIST
-				s_Ifc = s_Ifc + @ifc_exporter.ifcLengthMeasure(@coordinates.y) # should end with 0. : IfcLengthMeasure  # LIST
-				s_Ifc = s_Ifc + ", "  # LIST
-				s_Ifc = s_Ifc + @ifc_exporter.ifcLengthMeasure(@coordinates.z) # should end with 0. : IfcLengthMeasure  # LIST
-				s_Ifc = s_Ifc + ")"  # LIST
-				@a_Attributes << s_Ifc
-			end
-		end
+				@a_Attributes << @coordinates.get
+			end # initialize
+      def set_coordinates(aPoint3d, dimensionCount)
+				coordinates = Array.new
+        $i = 0
+        $num = dimensionCount.dim
+        while $i < $num do
+          lengthMeasure = IfcLengthMeasure.new(aPoint3d[$i])
+          if lengthMeasure
+            coordinates << lengthMeasure.string
+          end
+          $i +=1
+        end
+        if coordinates.length == dimensionCount.dim
+          @coordinates = IfcList.new(coordinates)
+        end
+      end # set_coordinates
+		end # IfcCartesianPoint
 		
 		class IfcDirection < IfcBase
 			attr_accessor :directionRatios
@@ -939,6 +1149,7 @@ module Brewsky
 		#21 = IFCAXIS2PLACEMENT3D(#22, $, $);
 		#22 = IFCCARTESIANPOINT((0., 0., 0.));
 		class IfcGeometricRepresentationContext < IfcBase
+			attr_reader :trueNorth
 			# Attribute	                      Type	                      Defined By
 			# ContextIdentifier	              IfcLabel (STRING)	          IfcRepresentationContext
 			# ContextType	                    IfcLabel (STRING)	          IfcRepresentationContext
@@ -951,6 +1162,8 @@ module Brewsky
 				@model = ifc_exporter.model
 				
 				transformation = Geom::Transformation.new
+        
+        set_TrueNorth(ifc_exporter)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
@@ -959,8 +1172,11 @@ module Brewsky
 				@a_Attributes << "3"
 				@a_Attributes << "1.000E-5"
 				@a_Attributes << IfcAxis2Placement3D.new(@ifc_exporter, transformation).record_nr
-				@a_Attributes << nil
+				@a_Attributes << @trueNorth.record_nr
 			end
+      def set_TrueNorth(ifc_exporter)
+        @trueNorth = IfcDirection.new(ifc_exporter, Geom::Vector3d.new(0,1,0))
+      end
 		end
 		
 		# http://www.buildingsmart-tech.org/ifc/IFC2x4/alpha/html/ifcsharedbldgelements/lexical/ifcwall.htm
@@ -1070,7 +1286,11 @@ module Brewsky
 			# Category    IfcLabel          IfcMaterial   OPTIONAL 2x4
 			def initialize(ifc_exporter, su_material)
 				init_common(ifc_exporter)
-				material_name = su_material.name
+				if su_material.nil?
+          material_name = "Default"
+        else
+          material_name = su_material.name
+        end
 				
 				IfcMaterialDefinitionRepresentation.new(ifc_exporter, self, su_material)
 				
@@ -1108,14 +1328,40 @@ module Brewsky
 			# Items	                    SET OF IfcRepresentationItem (ENTITY)	IfcRepresentation
 			def initialize(ifc_exporter, su_material)
 				init_common(ifc_exporter)
-				side = "POSITIVE"
+				#side = "POSITIVE"
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << IfcRepresentationContext.new(ifc_exporter).record_nr
+				@a_Attributes << ifc_exporter.ifcProject.representationContexts[0]
 				@a_Attributes << nil
 				@a_Attributes << nil
-				@a_Attributes << ifc_exporter.ifcList(IfcSurfaceStyle.new(ifc_exporter, su_material, side).record_nr)
+        @a_Attributes << ifc_exporter.ifcList(IfcStyledItem.new(ifc_exporter, nil, su_material).record_nr)
+				#@a_Attributes << ifc_exporter.ifcList(IfcSurfaceStyle.new(ifc_exporter, su_material, side).record_nr)
+			end
+		end
+		
+		#IFCSTYLEDITEM(#231,(#250),$);
+		class IfcStyledItem < IfcBase
+			# Attribute Type	                                          Defined By
+			# Item	    IfcRepresentationItem (ENTITY)	                IfcStyledItem OPTIONAL
+			# Styles	  SET OF IfcPresentationStyleAssignment (ENTITY)	IfcStyledItem
+			# Name	    IfcLabel (STRING)                               IfcStyledItem OPTIONAL
+      #
+      # WR11	 : 	 Restricts the number of styles to 1 (the datatype SET remains for compatibility reasons with ISO 10303-46).
+      # WR12	 : 	 A styled item cannot be styled by another styled item.
+      #
+			def initialize(ifc_exporter, entity, su_material)#source)
+				init_common(ifc_exporter)
+        
+				aPresentationStyles = Array.new
+				aPresentationStyles << IfcPresentationStyleAssignment.new(ifc_exporter, su_material, "POSITIVE").record_nr
+				#aPresentationStyles << IfcPresentationStyleAssignment.new(ifc_exporter, source.back_material, "NEGATIVE").record_nr
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << entity
+				@a_Attributes << ifc_exporter.ifcList(aPresentationStyles)
+				@a_Attributes << nil
 			end
 		end
 		
@@ -1216,7 +1462,7 @@ module Brewsky
 				@a_Attributes << @ifcMaterialSelect.record_nr
 			end
 			def add(ifcEntity)
-				@aRelatedObjects << ifcEntity
+				@aRelatedObjects << ifcEntity.record_nr
 			end
 		end
 		
@@ -1275,13 +1521,14 @@ module Brewsky
 			# SpecularHighlight	        IfcSpecularHighlightSelect (SELECT)	IfcSurfaceStyleRendering  OPTIONAL
 			# ReflectanceMethod	        IfcReflectanceMethodEnum (ENUM)	    IfcSurfaceStyleRendering
 			
-			def initialize(ifc_exporter, material)
+			def initialize(ifc_exporter, su_material)
 				init_common(ifc_exporter)
+        set_transparency(su_material)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << IfcColourRgb.new(ifc_exporter, material).record_nr
-				@a_Attributes << "IFCNORMALISEDRATIOMEASURE(" + material.alpha.to_s + ")"
+				@a_Attributes << IfcColourRgb.new(ifc_exporter, su_material).record_nr
+				@a_Attributes << @transparency
 				@a_Attributes << nil
 				@a_Attributes << nil
 				@a_Attributes << nil
@@ -1290,6 +1537,9 @@ module Brewsky
 				@a_Attributes << nil
 				@a_Attributes << ".NOTDEFINED."
 			end
+      def set_transparency(su_material)
+        @transparency = su_material == nil ? nil : "IFCNORMALISEDRATIOMEASURE(" + su_material.alpha.to_s + ")"
+      end
 		end
 		
 		#IFCSURFACESTYLE('21 Buitenwand metselwerk',.BOTH.,(#247));
@@ -1298,21 +1548,21 @@ module Brewsky
 			# Name	    IfcLabel (STRING)	                            IfcPresentationStyle
 			# Side	    IfcSurfaceSide (ENUM)	                        IfcSurfaceStyle
 			# Styles	  SET OF IfcSurfaceStyleElementSelect (SELECT)	IfcSurfaceStyle
-			def initialize(ifc_exporter, material, side)
-				@ifc_exporter = ifc_exporter
-				@entityType = "IFCSURFACESTYLE"
-				@ifc_exporter.add(self)
+			def initialize(ifc_exporter, su_material, side)
+				init_common(ifc_exporter)
+        
 				aSurfaceStyleElementSelect = Array.new
-				aSurfaceStyleElementSelect << IfcSurfaceStyleRendering.new(ifc_exporter, material).record_nr
+				aSurfaceStyleElementSelect << IfcSurfaceStyleRendering.new(ifc_exporter, su_material).record_nr
+        set_name(su_material)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << "'" + material_name(material) + "'"
+				@a_Attributes << @name.string
 				@a_Attributes << "." + side + "."
 				@a_Attributes << ifc_exporter.ifcList(aSurfaceStyleElementSelect)
 			end
-			def material_name(material)
-				material == nil ? "Default" : material.name
+			def set_name(su_material)
+				@name = IfcLabel.new(su_material == nil ? "Default" : su_material.name)
 			end
 		end
 		
@@ -1320,38 +1570,15 @@ module Brewsky
 		class IfcPresentationStyleAssignment < IfcBase
 			# Attribute Type	                                      Defined By
 			# Styles	  SET OF IfcPresentationStyleSelect (SELECT)	IfcPresentationStyleAssignment
-			def initialize(ifc_exporter, material, side)
-				@ifc_exporter = ifc_exporter
-				@entityType = "IFCPRESENTATIONSTYLEASSIGNMENT"
-				@ifc_exporter.add(self)
+			def initialize(ifc_exporter, su_material, side)
+				init_common(ifc_exporter)
+        
 				aPresentationStyleSelect = Array.new
-				aPresentationStyleSelect << IfcSurfaceStyle.new(ifc_exporter, material, side).record_nr
+				aPresentationStyleSelect << IfcSurfaceStyle.new(ifc_exporter, su_material, side).record_nr
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
 				@a_Attributes << ifc_exporter.ifcList(aPresentationStyleSelect)
-			end
-		end
-		
-		#IFCSTYLEDITEM(#231,(#250),$);
-		class IfcStyledItem < IfcBase
-			# Attribute Type	                                          Defined By
-			# Item	    IfcRepresentationItem (ENTITY)	                IfcStyledItem
-			# Styles	  SET OF IfcPresentationStyleAssignment (ENTITY)	IfcStyledItem
-			# Name	    IfcLabel (STRING)                               IfcStyledItem OPTIONAL
-			def initialize(ifc_exporter, entity, source)
-				@ifc_exporter = ifc_exporter
-				@entityType = "IFCSTYLEDITEM"
-				@ifc_exporter.add(self)
-				aPresentationStyles = Array.new
-				aPresentationStyles << IfcPresentationStyleAssignment.new(ifc_exporter, source.material, "POSITIVE").record_nr
-				aPresentationStyles << IfcPresentationStyleAssignment.new(ifc_exporter, source.back_material, "NEGATIVE").record_nr
-				
-				# "local" IFC array
-				@a_Attributes = Array.new
-				@a_Attributes << entity
-				@a_Attributes << ifc_exporter.ifcList(aPresentationStyles)
-				@a_Attributes << nil
 			end
 		end
 		
@@ -1394,13 +1621,15 @@ module Brewsky
 			def fill()
 				# "local" IFC array
 				@a_Attributes = Array.new
-				@a_Attributes << set_name(@su_entity, @entityTypeCc)
+				@a_Attributes << IfcLabel.new(@su_entity.name).string#set_name(@su_entity, @entityTypeCc)
 				@a_Attributes << set_description(@su_entity, @entityTypeCc)
 				@a_Attributes << @ifc_exporter.ifcList(@aAssignedItems)
 				@a_Attributes << nil
 			end
 			def add(ifcEntity)
-				@aAssignedItems << ifcEntity.representation.record_nr
+				unless ifcEntity.representation.nil?
+          @aAssignedItems << ifcEntity.representation.representations[0]
+        end
 			end
 		end
 		
@@ -1414,46 +1643,238 @@ module Brewsky
 			#ObjectType	      IfcLabel (STRING)	                IfcObject
 			#ObjectPlacement	IfcObjectPlacement (ENTITY)	      IfcProduct
 			#Representation	  IfcProductRepresentation (ENTITY)	IfcProduct
-			attr_accessor :objectPlacement, :representation
-			def set_objectPlacement(entity=nil)
+			attr_accessor :objectPlacement, :representation, :globalId, :parent
+			def initialize(ifc_exporter, parent, entity=nil, placement=nil, assembly=false)
+				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+        
+				# set parent object
+				set_parent(parent)
+        
+        @assembly = assembly
+        
+        # set representation and placement
+        set_Product_ObjectPlacement(entity, placement)
+        set_Product_Representation(entity)
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << set_globalId(entity, @entityTypeCc)
+				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
+				@a_Attributes << set_name(entity, @entityTypeCc, true)
+				@a_Attributes << set_description(entity, @entityTypeCc)
+				@a_Attributes << set_ObjectType
+				@a_Attributes << @objectPlacement.record_nr
+				@a_Attributes << @representation.record_nr
+			end
+      
+      def set_subtype(entity)
+        unless entity.nil? || entity.is_a?(Array)
+					entity.set_attribute('IfcProduct', 'SubType', @entityTypeCc)
+        end
+      end
+      
+      def set_Product_ObjectPlacement(entity, placement)
+        if placement.is_a?(Brewsky::IfcExport::IfcObjectPlacement)
+          @objectPlacement = placement
+        elsif placement.is_a?(Geom::Transformation)
+          @objectPlacement = set_ObjectPlacement(@parent, placement)
+        elsif entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
+          @objectPlacement = set_ObjectPlacement(@parent, entity.transformation)
+        else
+          @objectPlacement = set_ObjectPlacement(@parent, Geom::Transformation.new)
+        end
+      end # set_Product_ObjectPlacement
+      
+      def set_Product_Representation(entity)
+        if @assembly == true
+          @representation = nil
+        else
+          if entity.is_a?(Array)
+            @representation = set_ProductRepresentation(entity)
+          elsif entity.is_a?(Sketchup::Group)
+            @representation = set_ProductRepresentation(entity.entities)
+            #@representation = nil
+          elsif entity.is_a?(Sketchup::ComponentInstance)
+            @representation = set_ProductRepresentation(entity.definition.entities)
+            #@representation = nil
+          elsif entity.is_a?(Brewsky::IfcExport::IfcShapeRepresentation)
+            @representation = entity
+          else
+            @representation = nil
+            puts "No representation given for " + Self.to_s
+          end
+        end
+      end # set_Product_Representation
+      
+			def set_ObjectPlacement(parent=nil, transformation=nil)
 				
 				#parent transformation
-				transformation_parent = nil
-				
-				#entity transformation
-				if entity.nil?
-					transformation = nil
+        if parent.is_a?(IfcProduct)
+          transformation_parent = parent.objectPlacement
 				else
-					transformation = entity.transformation
+          transformation_parent = nil #self.parent.objectPlacement
 				end
 				
-				return IfcLocalPlacement.new(@ifc_exporter, transformation_parent, transformation)
+				if transformation.nil?
+					return nil
+				else
+					return IfcLocalPlacement.new(@ifc_exporter, transformation_parent, transformation)
+				end
 			end
-			def set_ProductRepresentation(entity)
+      
+			def set_ProductRepresentation(entities)
+				
+        if entities.is_a?(Sketchup::Group)
+          entities = entities.entities
+        end
+        
+        representation = nil
 				aRepresentations = Array.new
 				aGeometry = Array.new
+        
+        #puts @parent.representation
+        #if @parent.representation.nil?
+          representationIdentifier = "'Body'"
+        #else
+        #  representationIdentifier = "'Element'"
+        #end
+        
+				# check if the entity is manifold
+        if solid_check(entities)
 				
-				# check if the entity can be represented by an IfcExtrudedAreaSolid
-				Sketchup::require File.join(LIB_MAIN_PATH, 'extrusion_check')
-				extrusion = Brewsky::IFC::extrusion?(entity)
-				if extrusion == false
-					aGeometry << IfcFacetedBrep.new(@ifc_exporter, entity).record_nr
-					@representation = IfcShapeRepresentation.new(@ifc_exporter, "'Body'", "'Brep'", aGeometry)
-				else
-					face = extrusion[0]
-					edge = extrusion[1]
-					aGeometry << IfcExtrudedAreaSolid.new(@ifc_exporter, entity, face, edge).record_nr
-					
-					@representation = IfcShapeRepresentation.new(@ifc_exporter, "'Body'", "'SweptSolid'", aGeometry)
-				end
+          # check if the entity can be represented by an IfcExtrudedAreaSolid
+          Sketchup::require File.join(LIB_MAIN_PATH, 'extrusion_check')
+          extrusion = Brewsky::IFC::extrusion?(entities)
+          if extrusion == false
+            aGeometry << IfcFacetedBrep.new(@ifc_exporter, entities).record_nr
+            representation = IfcShapeRepresentation.new(@ifc_exporter, representationIdentifier, "'Brep'", aGeometry)
+          else
+            face = extrusion[0]
+            edge = extrusion[1]
+            aGeometry << IfcExtrudedAreaSolid.new(@ifc_exporter, face, edge).record_nr
+            representation = IfcShapeRepresentation.new(@ifc_exporter, representationIdentifier, "'SweptSolid'", aGeometry)
+          end
+        else
+          aGeometry << IfcFaceBasedSurfaceModel.new(@ifc_exporter, entities).record_nr
+          representation = IfcShapeRepresentation.new(@ifc_exporter, representationIdentifier, "'SurfaceModel'", aGeometry)
+        end
 				
-				aRepresentations << @representation.record_nr
-				return IfcProductDefinitionShape.new(@ifc_exporter, entity, aRepresentations)
+				aRepresentations << representation.record_nr
+				
+				productRepresentation = IfcProductDefinitionShape.new(@ifc_exporter, aRepresentations)
+				
+				return productRepresentation
 			end
+			
+			# add objects for IfcRelAggregates
+			def add_RelatedObject(child)
+				if @ifcRelAggregates
+					@ifcRelAggregates.add_RelatedObject(child)
+				else
+					@ifcRelAggregates = IfcRelAggregates.new(@ifc_exporter, nil, nil, self, child)
+				end
+			end
+			
+			# determine correct containment in project hierarchy
+			def set_parent(parent)
+				@parent = parent
+        if parent.is_a?(IfcSite) || parent.is_a?(IfcBuilding) || parent.is_a?(IfcBuildingStorey) || parent.is_a?(IfcSpace)
+					parent.add_ContainedObject(self)
+				else
+					parent.add_RelatedObject(self)
+				end
+			end
+      
+      
+			
+			# function to figure out if an Array of Edges makes solid objects
+			# input: Array of Edges
+			# output: true or false
+			def solid_check(aEntities)
+				#aEdges = Array.new
+        #aFaces.each do |face|
+        #  aEdges.concat(face.edges)
+        #end
+        #aEdges.uniq!
+        
+        if aEntities.length == 0
+					return false
+				end
+				aEntities.each do |edge|
+					if edge.is_a?(Sketchup::Edge)
+            if edge.faces.length != 2
+              return false
+            end
+          end
+				end
+				return true
+			end # solid_check
 		end
 		
-	#18=IFCBUILDING('ABCDEFGHIJKLMNOPQ00002',#9,'Testgebouw ','Omschrijving',$,$,$,$,.ELEMENT.,$,$,$);
-		class IfcBuilding < IfcProduct
+		class IfcElement < IfcProduct
+			attr_accessor :tag
+			def initialize(ifc_exporter, parent, entity=nil)
+				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+				
+				# set parent object
+				set_parent(parent)
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << set_globalId(entity, @entityTypeCc)
+				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
+				@a_Attributes << set_name(entity, @entityTypeCc, true)
+				@a_Attributes << set_description(entity, @entityTypeCc)
+				@a_Attributes << set_ObjectType
+				@a_Attributes << set_ObjectPlacement(parent, entity).record_nr
+				@a_Attributes << set_ProductRepresentation(entity).record_nr
+				@a_Attributes << set_Tag
+        
+        if entity.is_a?(Sketchup::Group)
+          set_ObjectPlacement(parent, entity)
+        end
+			end
+			def set_Tag(entity=nil)
+				@tag = nil
+			end
+		end
+    
+		class IfcElementAssembly < IfcElement
+			attr_accessor :assemblyPlace, :predefinedType
+			def initialize(ifc_exporter, parent, entity=nil, placement=nil)
+				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+        
+				# set parent object
+				set_parent(parent)
+        
+        # set placement
+        set_Product_ObjectPlacement(entity, placement)
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << set_globalId(entity, @entityTypeCc)
+				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
+				@a_Attributes << set_name(entity, @entityTypeCc, true)
+				@a_Attributes << set_description(entity, @entityTypeCc)
+				@a_Attributes << set_ObjectType
+				@a_Attributes << @objectPlacement.record_nr
+				@a_Attributes << nil #productRepresentation
+				@a_Attributes << set_Tag
+				@a_Attributes << ".NOTDEFINED."
+				@a_Attributes << ".NOTDEFINED."
+			end
+    end # IfcElementAssembly
+		
+		class IfcSpatialStructureElement < IfcProduct
 			# Attribute	            Type	                            Defined By
 			# GlobalId	            IfcGloballyUniqueId (STRING)	    IfcRoot
 			# OwnerHistory	        IfcOwnerHistory (ENTITY)	        IfcRoot
@@ -1464,39 +1885,45 @@ module Brewsky
 			# Representation	      IfcProductRepresentation (ENTITY)	IfcProduct
 			# LongName	            IfcLabel (STRING)	                IfcSpatialStructureElement
 			# CompositionType	      IfcElementCompositionEnum (ENUM)	IfcSpatialStructureElement
-			# ElevationOfRefHeight	IfcLengthMeasure (REAL)	          IfcBuilding
-			# ElevationOfTerrain	  IfcLengthMeasure (REAL)	          IfcBuilding
-			# BuildingAddress	      IfcPostalAddress (ENTITY)	        IfcBuilding
-			def initialize(ifc_exporter)
+			def initialize(ifc_exporter, parent, entity=nil)
 				init_common(ifc_exporter)
 				
-				# TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-				#41 = IFCRELAGGREGATES('2QTqyzvgj6qBjsx1U3rHkG', #2, 'BuildingContainer', 'BuildingContainer for BuildigStories', #29, (#35));
+        # set subtype
+        set_subtype(entity)
+				
+				init_IfcSpatialStructureElement(parent)
 				
 				# "local" IFC array
 				@a_Attributes = Array.new
 				@a_Attributes << set_globalId(@model, @entityTypeCc)
-				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr #set_ownerHistory()
+				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
 				@a_Attributes << set_name
 				@a_Attributes << set_description
 				@a_Attributes << nil
-				@a_Attributes << nil# set_objectPlacement().record_nr
+				@a_Attributes << nil
 				@a_Attributes << nil
 				@a_Attributes << nil
 				@a_Attributes << ".ELEMENT."
-				@a_Attributes << nil
-				@a_Attributes << nil
-				@a_Attributes << nil
 			end
-			def set_guid
-				if @model.get_attribute("IfcProduct", "GlobalId")
-					return @model.get_attribute("IfcProduct", "GlobalId")
-				else
-					guid = Brewsky::IFC::new_guid
-					@model.set_attribute("IfcProduct", "GlobalId", guid)
-					return guid
-				end
-			end
+			
+			# multiple objects stored in "model" need different ifc classifications for attributes
+			
+			#def set_globalId(entity, ifc_type)
+				#if entity.nil? || entity.is_a?(Array) # if loose group of geometry
+					#@globalId = Brewsky::IFC::new_guid
+					#return "'" + @globalId + "'"
+				#elsif entity.get_attribute("IfcProduct", "GlobalId")
+					#@globalId = entity.get_attribute("IfcProduct", "GlobalId")
+					#return "'" + @globalId + "'"
+				#else
+					#@globalId = Brewsky::IFC::new_guid
+					#unless entity.nil?
+						#entity.set_attribute("IfcProduct", "GlobalId", @globalId)
+					#end
+					#return "'" + @globalId + "'"
+				#end
+			#end
+			
 			def set_name
 				if @model.get_attribute("IfcProduct", "Name")
 					return @model.get_attribute("IfcProduct", "Name")
@@ -1519,10 +1946,273 @@ module Brewsky
 					return nil
 				end
 			end
+			
+			# determine correct containment in project hierarchy
+			def set_parent(parent)
+				@parent = parent
+        parent.add_RelatedObject(self)
+			end
+			
+			# add contained object (IfcRelContainedInSpatialStructure)
+			def add_ContainedObject(child)
+				if @ifcRelContainedInSpatialStructure
+					@ifcRelContainedInSpatialStructure.add_RelatedObject(child)
+				else
+					@ifcRelContainedInSpatialStructure = IfcRelContainedInSpatialStructure.new(@ifc_exporter, nil, nil, self, child.record_nr)
+				end
+			end
+			
+			# initialisation for all subclasses of IfcSpatialStructureElement
+			def init_IfcSpatialStructureElement(parent)
+        @parent = parent
+				# set parent object
+				parent.add_RelatedObject(self)
+			end
+		end
+		
+		# IFCSITE('" + site_id + "', " + id_s(2) + ", '" + site_name + "', '" + site_description + "', $, " + id_s(24) + ", $, $, .ELEMENT., (" + lat[0] + ", " + lat[1] + ", " + lat[2] + "), (" + long[0] + ", " + long[1] + ", " + long[2] + "), $, $, $);"
+		
+		#24 = IFCSITE('2ZjPp2Z9P6D8e7u9GDoxr4', #2, 'Default Site', 'Description of Default Site', $, #25, $, $, .ELEMENT., (24, 28, 0), (54, 25, 0), 10., $, $);
+		#25 = IFCLOCALPLACEMENT($, #26);
+		#26 = IFCAXIS2PLACEMENT3D(#27, #28, #29);
+		#27 = IFCCARTESIANPOINT((0.E-1, 0.E-1, 0.E-1));
+		#28 = IFCDIRECTION((0.E-1, 0.E-1, 1.));
+		#29 = IFCDIRECTION((1., 0.E-1, 0.E-1));
+		
+		#43 = IFCRELAGGREGATES('1f_92NYQD0lBChEeKfihEz', #2, 'BuildingContainer', 'BuildingContainer for BuildigStories', #30, (#37));
+		#44 = IFCRELAGGREGATES('03QlbDcwz3wAQb2KBzxujQ', #2, 'SiteContainer', 'SiteContainer For Buildings', #24, (#30));
+		#45 = IFCRELAGGREGATES('07oQHvxvvFswj91PBXi3Mo', #2, 'ProjectContainer', 'ProjectContainer for Sites', #1, (#24));
+		#46 = IFCRELCONTAINEDINSPATIALSTRUCTURE('2Or2FBptr1gPkbt_$syMeu', #2, 'Default Building', 'Contents of Building Storey', (#47, #170), #37);
+		class IfcSite < IfcSpatialStructureElement
+			attr_reader :refLatitude, :refElevation, :landTitleNumber, :siteAddress
+      # Attribute	      Type	                                    Defined By
+      # GlobalId	      IfcGloballyUniqueId (STRING)	            IfcRoot
+      # OwnerHistory	  IfcOwnerHistory (ENTITY)	                IfcRoot
+      # Name	          IfcLabel (STRING)	                        IfcRoot                     OPTIONAL
+      # Description	    IfcText (STRING)	                        IfcRoot                     OPTIONAL
+      # ObjectType	    IfcLabel (STRING)	                        IfcObject                   OPTIONAL
+      # ObjectPlacement	IfcObjectPlacement (ENTITY)	              IfcProduct                  OPTIONAL
+      # Representation	IfcProductRepresentation (ENTITY)	        IfcProduct                  OPTIONAL
+      # LongName	      IfcLabel (STRING)	                        IfcSpatialStructureElement  OPTIONAL
+      # CompositionType	IfcElementCompositionEnum (ENUM)	        IfcSpatialStructureElement
+      # RefLatitude	    IfcCompoundPlaneAngleMeasure (AGGREGATE)	IfcSite                     OPTIONAL
+      # RefLongitude	  IfcCompoundPlaneAngleMeasure (AGGREGATE)	IfcSite                     OPTIONAL
+      # RefElevation	  IfcLengthMeasure (REAL)	                  IfcSite                     OPTIONAL
+      # LandTitleNumber	IfcLabel (STRING)	                        IfcSite                     OPTIONAL
+      # SiteAddress	    IfcPostalAddress (ENTITY)	                IfcSite                     OPTIONAL
+			def initialize(ifc_exporter, parent, entity=nil)
+				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+				
+				init_IfcSpatialStructureElement(parent)
+				
+				# placement of the site is on the origin, it does not have geometry yet\
+				
+				# set project location
+				set_latlong
+        
+        # set representation and placement
+        set_Product_ObjectPlacement(nil, nil)
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << set_globalId(@model, @entityTypeCc)
+				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr #set_ownerHistory()
+				@a_Attributes << set_name
+				@a_Attributes << set_description
+				@a_Attributes << nil
+				@a_Attributes << @objectPlacement.record_nr
+				@a_Attributes << nil
+				@a_Attributes << nil
+				@a_Attributes << ".ELEMENT."
+				@a_Attributes << latitude
+				@a_Attributes << longtitude
+				@a_Attributes << elevation
+				@a_Attributes << nil
+				@a_Attributes << nil
+			end
+			
+			# get project location
+			def set_latlong
+				if @model.georeferenced?
+          local_coordinates = [0,0,0]
+          local_point = Geom::Point3d.new(local_coordinates)
+          ll = Sketchup.active_model.point_to_latlong(local_point)
+          @latlong = ll
+        end
+			end
+			def latitude
+				if @model.georeferenced?
+          lat = sprintf("%.4f", @latlong[0])
+          lat = lat.split('.')
+          latpart = lat[1].split(//)
+          lat = [lat[0], latpart[0] + latpart[1], latpart[2] + latpart[3]]
+          return @ifc_exporter.ifcList(lat)
+        end
+			end
+			def longtitude
+				if @model.georeferenced?
+          long = sprintf("%.4f", @latlong[1])
+          long = long.split('.')
+          longpart = long[1].split(//)
+          long = [long[0], longpart[0] + longpart[1], longpart[2] + longpart[3]]
+          return @ifc_exporter.ifcList(long)
+        end
+			end
+			def elevation
+				if @model.georeferenced?
+          return @ifc_exporter.ifcLengthMeasure(@latlong[2])
+        end
+			end
+			
+			# add contained object (IfcRelContainedInSpatialStructure)
+			def add_ContainedObject(child)
+				if @ifcRelContainedInSpatialStructure
+					@ifcRelContainedInSpatialStructure.add_RelatedObject(child)
+				else
+					@ifcRelContainedInSpatialStructure = IfcRelContainedInSpatialStructure.new(@ifc_exporter, "'SiteContainer'", "'SiteContainer For Buildings'", self, child)
+				end
+			end
+		end
+		
+	#18=IFCBUILDING('ABCDEFGHIJKLMNOPQ00002',#9,'Testgebouw ','Omschrijving',$,$,$,$,.ELEMENT.,$,$,$);
+		class IfcBuilding < IfcSpatialStructureElement
+			# Attribute	            Type	                            Defined By
+			# GlobalId	            IfcGloballyUniqueId (STRING)	    IfcRoot
+			# OwnerHistory	        IfcOwnerHistory (ENTITY)	        IfcRoot
+			# Name	                IfcLabel (STRING)	                IfcRoot
+			# Description	          IfcText (STRING)	                IfcRoot
+			# ObjectType	          IfcLabel (STRING)	                IfcObject
+			# ObjectPlacement	      IfcObjectPlacement (ENTITY)	      IfcProduct
+			# Representation	      IfcProductRepresentation (ENTITY)	IfcProduct
+			# LongName	            IfcLabel (STRING)	                IfcSpatialStructureElement
+			# CompositionType	      IfcElementCompositionEnum (ENUM)	IfcSpatialStructureElement
+			# ElevationOfRefHeight	IfcLengthMeasure (REAL)	          IfcBuilding
+			# ElevationOfTerrain	  IfcLengthMeasure (REAL)	          IfcBuilding
+			# BuildingAddress	      IfcPostalAddress (ENTITY)	        IfcBuilding
+			def initialize(ifc_exporter, parent, entity=nil)
+				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+				
+				init_IfcSpatialStructureElement(parent)
+				
+				# set parent object
+				#set_parent(parent)
+        
+        # set ObjectPlacement, no parent placement
+        #set_ObjectPlacement(parent, entity)
+        #@objectPlacement = parent.objectPlacement
+        #puts "building"
+        #puts @objectPlacement.record_nr
+        
+        
+        # set representation and placement
+        set_Product_ObjectPlacement(nil, nil)
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << set_globalId(@model, @entityTypeCc)
+				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr #set_ownerHistory()
+				@a_Attributes << set_name
+				@a_Attributes << set_description
+				@a_Attributes << nil
+				@a_Attributes << @objectPlacement.record_nr
+				@a_Attributes << nil
+				@a_Attributes << nil
+				@a_Attributes << ".ELEMENT."
+				@a_Attributes << nil
+				@a_Attributes << nil
+				@a_Attributes << nil
+			end
+			
+			# add contained object (IfcRelContainedInSpatialStructure)
+			def add_ContainedObject(child)
+				if @ifcRelContainedInSpatialStructure
+					@ifcRelContainedInSpatialStructure.add_RelatedObject(child)
+				else
+					@ifcRelContainedInSpatialStructure = IfcRelContainedInSpatialStructure.new(@ifc_exporter, "BuildingContainer'", "'BuildingContainer for BuildigStories'", self, child)
+				end
+			end
+		end
+		
+		class IfcBuildingStorey < IfcSpatialStructureElement
+			# Attribute	            Type	                            Defined By
+			# GlobalId	            IfcGloballyUniqueId (STRING)	    IfcRoot
+			# OwnerHistory	        IfcOwnerHistory (ENTITY)	        IfcRoot
+			# Name	                IfcLabel (STRING)	                IfcRoot
+			# Description	          IfcText (STRING)	                IfcRoot
+			# ObjectType	          IfcLabel (STRING)	                IfcObject
+			# ObjectPlacement	      IfcObjectPlacement (ENTITY)	      IfcProduct
+			# Representation	      IfcProductRepresentation (ENTITY)	IfcProduct
+			# LongName	            IfcLabel (STRING)	                IfcSpatialStructureElement
+			# CompositionType	      IfcElementCompositionEnum (ENUM)	IfcSpatialStructureElement
+			# Elevation							IfcLengthMeasure (REAL)	          IfcBuildingStorey
+			def initialize(ifc_exporter, parent, entity=nil)
+				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+				
+				init_IfcSpatialStructureElement(parent)
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << set_globalId(@model, @entityTypeCc)
+				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
+				@a_Attributes << set_name
+				@a_Attributes << set_description
+				@a_Attributes << nil
+				@a_Attributes << nil
+				@a_Attributes << nil
+				@a_Attributes << nil
+				@a_Attributes << ".ELEMENT."
+				@a_Attributes << nil
+			end
+		end
+		
+		class IfcSpace < IfcSpatialStructureElement
+			# Attribute	            	Type	                            Defined By
+			# GlobalId	            	IfcGloballyUniqueId (STRING)	    IfcRoot
+			# OwnerHistory	        	IfcOwnerHistory (ENTITY)	        IfcRoot
+			# Name	                	IfcLabel (STRING)	                IfcRoot
+			# Description	          	IfcText (STRING)	                IfcRoot
+			# ObjectType	          	IfcLabel (STRING)	                IfcObject
+			# ObjectPlacement	      	IfcObjectPlacement (ENTITY)	      IfcProduct
+			# Representation	      	IfcProductRepresentation (ENTITY)	IfcProduct
+			# LongName	            	IfcLabel (STRING)	                IfcSpatialStructureElement
+			# CompositionType	      	IfcElementCompositionEnum (ENUM)	IfcSpatialStructureElement
+			# InteriorOrExteriorSpace	IfcInternalOrExternalEnum (ENUM)	IfcSpace
+			# ElevationWithFlooring		IfcLengthMeasure (REAL)						IfcSpace
+			def initialize(ifc_exporter, parent, entity=nil)
+				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+				
+				init_IfcSpatialStructureElement(parent)
+				
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << set_globalId(@model, @entityTypeCc)
+				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
+				@a_Attributes << set_name
+				@a_Attributes << set_description
+				@a_Attributes << nil
+				@a_Attributes << nil
+				@a_Attributes << nil
+				@a_Attributes << nil
+				@a_Attributes << ".ELEMENT."
+				@a_Attributes << nil
+				@a_Attributes << nil
+			end
 		end
 		
 		#46 = IFCRELCONTAINEDINSPATIALSTRUCTURE('2Or2FBptr1gPkbt_$syMeu', #2, 'Default Building', 'Contents of Building Storey', (#47, #170), #37);
-		class IfcRelContainedInSpatialStructure < IfcProduct
+		class IfcRelContainedInSpatialStructure < IfcRoot
 			# Attribute	        Type	                              Defined By
 			# GlobalId	        IfcGloballyUniqueId (STRING)	      IfcRoot
 			# OwnerHistory	    IfcOwnerHistory (ENTITY)	          IfcRoot
@@ -1530,20 +2220,29 @@ module Brewsky
 			# Description	      IfcText (STRING)	                  IfcRoot                           OPTIONAL
 			# RelatedElements	  SET OF IfcProduct (ENTITY)	        IfcRelContainedInSpatialStructure
 			# RelatingStructure	IfcSpatialStructureElement (ENTITY)	IfcRelContainedInSpatialStructure
-			def initialize(ifc_exporter)
-				@ifc_exporter = ifc_exporter
-				@entityType = "IFCRELCONTAINEDINSPATIALSTRUCTURE"
-				@ifc_exporter.add(self)
-			end
-			def fill()
+			def initialize(ifc_exporter, name, description, relating, related=nil)
+				init_common(ifc_exporter)
+				@relatedObjects = IfcList.new
+				
 				# "local" IFC array
 				@a_Attributes = Array.new
 				@a_Attributes << "'" + Brewsky::IFC::new_guid + "'"
 				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
 				@a_Attributes << "'BuildingContainer'" # only correct for site!!!
 				@a_Attributes << "'Contents of Building'" # only correct for site!!!
-				@a_Attributes << @ifc_exporter.ifcList(@ifc_exporter.aContainedInBuilding)
-				@a_Attributes << @ifc_exporter.ifcBuilding.record_nr
+				@a_Attributes << @relatedObjects.get
+				@a_Attributes << relating.record_nr
+				
+				unless related.nil?
+					add_RelatedObject(related)
+				end
+				
+			end
+			def add_RelatedObject(child)
+				@relatedObjects.add(child.record_nr)
+				
+				# temporary solution update list contents
+				@a_Attributes[4] = @relatedObjects.get
 			end
 		end
 		
@@ -1588,10 +2287,17 @@ module Brewsky
 		#92 = IFCAXIS2PLACEMENT3D(#93, #94, #95);
 		#96 = IFCDIRECTION((0., 0., 1.));
 		class IfcProductDefinitionShape < IfcBase
+      # Attribute	      Type	                              Defined By
+      # Name	          IfcLabel (STRING)	                  IfcProductRepresentation
+      # Description	    IfcText (STRING)	                  IfcProductRepresentation
+      # Representations	LIST OF IfcRepresentation (ENTITY)	IfcProductRepresentation
+      #
+      # WR11	 : 	 Only representations of type IfcShapeModel, i.e. either IfcShapeRepresentation or IfcTopologyRepresentation should be used to represent a product through the IfcProductDefinitionShape.
+      #
 			attr_accessor :name, :description, :record_nr, :representations
-			def initialize(ifc_exporter, bt_entity, aRepresentations)
+			def initialize(ifc_exporter, aRepresentations)
 				@ifc_exporter = ifc_exporter
-				@bt_entity = bt_entity
+				#@bt_entity = bt_entity
 				@representations = aRepresentations
 				@entityType = "IFCPRODUCTDEFINITIONSHAPE"
 				ifc_exporter.add(self)
@@ -1630,106 +2336,6 @@ module Brewsky
 			end
 			def set_representations
 				return @ifc_exporter.ifcList(@representations)
-			end
-		end
-		
-		# IFCSITE('" + site_id + "', " + id_s(2) + ", '" + site_name + "', '" + site_description + "', $, " + id_s(24) + ", $, $, .ELEMENT., (" + lat[0] + ", " + lat[1] + ", " + lat[2] + "), (" + long[0] + ", " + long[1] + ", " + long[2] + "), $, $, $);"
-		
-		#24 = IFCSITE('2ZjPp2Z9P6D8e7u9GDoxr4', #2, 'Default Site', 'Description of Default Site', $, #25, $, $, .ELEMENT., (24, 28, 0), (54, 25, 0), 10., $, $);
-		#25 = IFCLOCALPLACEMENT($, #26);
-		#26 = IFCAXIS2PLACEMENT3D(#27, #28, #29);
-		#27 = IFCCARTESIANPOINT((0.E-1, 0.E-1, 0.E-1));
-		#28 = IFCDIRECTION((0.E-1, 0.E-1, 1.));
-		#29 = IFCDIRECTION((1., 0.E-1, 0.E-1));
-		
-		#43 = IFCRELAGGREGATES('1f_92NYQD0lBChEeKfihEz', #2, 'BuildingContainer', 'BuildingContainer for BuildigStories', #30, (#37));
-		#44 = IFCRELAGGREGATES('03QlbDcwz3wAQb2KBzxujQ', #2, 'SiteContainer', 'SiteContainer For Buildings', #24, (#30));
-		#45 = IFCRELAGGREGATES('07oQHvxvvFswj91PBXi3Mo', #2, 'ProjectContainer', 'ProjectContainer for Sites', #1, (#24));
-		#46 = IFCRELCONTAINEDINSPATIALSTRUCTURE('2Or2FBptr1gPkbt_$syMeu', #2, 'Default Building', 'Contents of Building Storey', (#47, #170), #37);
-		class IfcSite < IfcProduct
-		# Attribute	      Type	                                    Defined By
-		# GlobalId	      IfcGloballyUniqueId (STRING)	            IfcRoot
-		# OwnerHistory	  IfcOwnerHistory (ENTITY)	                IfcRoot
-		# Name	          IfcLabel (STRING)	                        IfcRoot                     OPTIONAL
-		# Description	    IfcText (STRING)	                        IfcRoot                     OPTIONAL
-		# ObjectType	    IfcLabel (STRING)	                        IfcObject                   OPTIONAL
-		# ObjectPlacement	IfcObjectPlacement (ENTITY)	              IfcProduct                  OPTIONAL
-		# Representation	IfcProductRepresentation (ENTITY)	        IfcProduct                  OPTIONAL
-		# LongName	      IfcLabel (STRING)	                        IfcSpatialStructureElement  OPTIONAL
-		# CompositionType	IfcElementCompositionEnum (ENUM)	        IfcSpatialStructureElement
-		# RefLatitude	    IfcCompoundPlaneAngleMeasure (AGGREGATE)	IfcSite                     OPTIONAL
-		# RefLongitude	  IfcCompoundPlaneAngleMeasure (AGGREGATE)	IfcSite                     OPTIONAL
-		# RefElevation	  IfcLengthMeasure (REAL)	                  IfcSite                     OPTIONAL
-		# LandTitleNumber	IfcLabel (STRING)	                        IfcSite                     OPTIONAL
-		# SiteAddress	    IfcPostalAddress (ENTITY)	                IfcSite                     OPTIONAL
-			def initialize(ifc_exporter)
-				init_common(ifc_exporter)
-				
-				# placement of the site is on the origin, it does not have geometry yet
-				site_placement = nil
-				
-				# set project location
-				set_latlong
-				
-				# "local" IFC array
-				@a_Attributes = Array.new
-				@a_Attributes << set_globalId(@model, @entityTypeCc)
-				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr #set_ownerHistory()
-				@a_Attributes << set_name(@model, @entityTypeCc)
-				@a_Attributes << set_description(@model, @entityTypeCc)
-				@a_Attributes << nil
-				@a_Attributes << set_objectPlacement(site_placement).record_nr
-				@a_Attributes << nil
-				@a_Attributes << nil
-				@a_Attributes << ".ELEMENT."
-				@a_Attributes << latitude
-				@a_Attributes << longtitude
-				@a_Attributes << elevation
-				@a_Attributes << nil
-				@a_Attributes << nil
-				
-			end
-			
-			def set_guid
-				if @model.get_attribute("IfcProduct", "GlobalId")
-					return @model.get_attribute("IfcProduct", "GlobalId")
-				else
-					guid = Brewsky::IFC::new_guid
-					@model.set_attribute("IfcProduct", "GlobalId", guid)
-					return guid
-				end
-			end
-			
-			# get project location
-			def set_latlong
-				local_coordinates = [0,0,0]
-				local_point = Geom::Point3d.new(local_coordinates)
-				ll = Sketchup.active_model.point_to_latlong(local_point)
-				@latlong = ll
-			end
-			def latitude
-				lat = sprintf("%.4f", @latlong[0])
-				lat = lat.split('.')
-				latpart = lat[1].split(//)
-				lat = [lat[0], latpart[0] + latpart[1], latpart[2] + latpart[3]]
-				return @ifc_exporter.ifcList(lat)
-			end
-			def longtitude
-				long = sprintf("%.4f", @latlong[1])
-				long = long.split('.')
-				longpart = long[1].split(//)
-				long = [long[0], longpart[0] + longpart[1], longpart[2] + longpart[3]]
-				return @ifc_exporter.ifcList(long)
-			end
-			def elevation
-				return @ifc_exporter.ifcLengthMeasure(@latlong[2])
-			end
-		end
-		
-		class IfcElement < IfcProduct
-			attr_accessor :tag
-			def set_tag(entity)
-				@tag = nil
 			end
 		end
 		
@@ -1783,7 +2389,7 @@ module Brewsky
 				@a_Attributes << set_name #optional
 				@a_Attributes << set_description #optional
 				@a_Attributes << set_ObjectType
-				@a_Attributes << set_objectPlacement(bt_entity).record_nr #optional
+				@a_Attributes << set_ObjectPlacement(bt_entity).record_nr #optional
 				@a_Attributes << set_ProductRepresentation.record_nr #optional
 				@a_Attributes << set_Tag
 			end
@@ -1818,26 +2424,19 @@ module Brewsky
 			#ObjectPlacement	IfcObjectPlacement (ENTITY)	      IfcProduct (OPTIONAL)
 			#Representation	  IfcProductRepresentation (ENTITY)	IfcProduct (OPTIONAL)
 			#Tag	            IfcIdentifier (STRING)	          IfcElement (OPTIONAL)
-			def set_Tag
-				return nil
-			end
-		end
-		
-		#335= IFCBUILDINGELEMENTPROXY('klqTK3FMXbp3CxV_vgB$sh',#1,'DAKLIGGER','120/400',$,#328,#331,'201:100071:1357846514-100130',$);
-		class IfcBuildingElementProxy < IfcBuildingElement
-			#Attribute	      Type	                            Defined By
-			#GlobalId	        IfcGloballyUniqueId (STRING)	    IfcRoot
-			#OwnerHistory	    IfcOwnerHistory (ENTITY)	        IfcRoot
-			#Name	            IfcLabel (STRING)	                IfcRoot (OPTIONAL)
-			#Description	    IfcText (STRING)	                IfcRoot (OPTIONAL)
-			#ObjectType	      IfcLabel (STRING)	                IfcObject (OPTIONAL)
-			#ObjectPlacement	IfcObjectPlacement (ENTITY)	      IfcProduct (OPTIONAL)
-			#Representation	  IfcProductRepresentation (ENTITY)	IfcProduct (OPTIONAL)
-			#Tag	            IfcIdentifier (STRING)	          IfcElement (OPTIONAL)
-			#CompositionType	IfcElementCompositionEnum (ENUM)	IfcBuildingElementProxy (OPTIONAL)
-			def initialize(ifc_exporter, entity)
+			def initialize(ifc_exporter, parent, entity=nil)
 				init_common(ifc_exporter)
-
+				
+        # set subtype
+        set_subtype(entity)
+				
+				# set parent object
+				set_parent(parent)
+        
+        # set representation and placement
+        set_Product_ObjectPlacement(entity, nil)
+        set_Product_Representation(entity)
+				
 				# "local" IFC array
 				@a_Attributes = Array.new
 				@a_Attributes << set_globalId(entity, @entityTypeCc)
@@ -1845,16 +2444,72 @@ module Brewsky
 				@a_Attributes << set_name(entity, @entityTypeCc, true)
 				@a_Attributes << set_description(entity, @entityTypeCc)
 				@a_Attributes << set_ObjectType
-				@a_Attributes << set_objectPlacement(entity).record_nr
-				@a_Attributes << set_ProductRepresentation(entity).record_nr
+				@a_Attributes << @objectPlacement.record_nr
+				@a_Attributes << @representation.record_nr
 				@a_Attributes << set_Tag
-				@a_Attributes << set_CompositionType
-				
-				#add self to the list of entities contained in the building
-				@ifc_exporter.add_to_building(self)
+        
 			end
-			def set_CompositionType
-				return nil
+		end
+		
+		#335= IFCBUILDINGELEMENTPROXY('klqTK3FMXbp3CxV_vgB$sh',#1,'DAKLIGGER','120/400',$,#328,#331,'201:100071:1357846514-100130',$);
+		class IfcBuildingElementProxy < IfcBuildingElement
+			# Attribute       Type	                            Defined By
+			# GlobalId        IfcGloballyUniqueId (STRING)	    IfcRoot
+			# OwnerHistory    IfcOwnerHistory (ENTITY)	        IfcRoot
+			# Name            IfcLabel (STRING)	                IfcRoot (OPTIONAL)
+			# Description     IfcText (STRING)	                IfcRoot (OPTIONAL)
+			# ObjectType      IfcLabel (STRING)	                IfcObject (OPTIONAL)
+			# ObjectPlacement IfcObjectPlacement (ENTITY)	      IfcProduct (OPTIONAL)
+			# Representation  IfcProductRepresentation (ENTITY)	IfcProduct (OPTIONAL)
+			# Tag             IfcIdentifier (STRING)	          IfcElement (OPTIONAL)
+			# CompositionType IfcElementCompositionEnum (ENUM)	IfcBuildingElementProxy (OPTIONAL)
+      #
+      # WR1	 : 	 A Name attribute should be asserted for a building element proxy.
+      #
+			def initialize(ifc_exporter, parent, entity=nil, compositionType=nil, assembly=false)
+				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+				
+				# set parent object
+				set_parent(parent)
+        
+        @assembly = assembly
+        
+        # set representation and placement
+        set_Product_ObjectPlacement(entity, nil)
+        set_Product_Representation(entity)
+
+				# "local" IFC array
+				@a_Attributes = Array.new
+				@a_Attributes << set_globalId(entity, "IfcProduct")
+				@a_Attributes << @ifc_exporter.ifcProject.ifcOwnerHistory.record_nr
+				@a_Attributes << ifcBuildingElementProxy_set_name(entity)
+				@a_Attributes << set_description(entity, "IfcProduct")
+				@a_Attributes << set_ObjectType
+				@a_Attributes << @objectPlacement.record_nr
+				@a_Attributes << if @representation.nil? then nil else @representation.record_nr end
+				@a_Attributes << set_Tag
+				@a_Attributes << set_CompositionType(compositionType)
+        
+			end
+			def set_CompositionType(type)
+				if type.nil?
+          return ".ELEMENT."
+        else
+          return "." + type + "."
+        end
+			end
+			def ifcBuildingElementProxy_set_name(entity)
+				name = set_name(entity, "IfcProduct", true)
+        if name.nil?
+          name = "'NOTDEFINED'"
+          unless entity.is_a?(Array)
+            entity.set_attribute("IfcProduct", 'Name', name)
+          end
+        end
+        return name
 			end
 		end
 
@@ -1868,8 +2523,20 @@ module Brewsky
 			#ObjectPlacement	IfcObjectPlacement (ENTITY)	      IfcProduct (OPTIONAL)
 			#Representation	  IfcProductRepresentation (ENTITY)	IfcProduct (OPTIONAL)
 			#Tag	            IfcIdentifier (STRING)	          IfcElement (OPTIONAL)
-			def initialize(ifc_exporter, entity)
+			def initialize(ifc_exporter, parent, entity=nil, assembly=false)
 				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+				
+				# set parent object
+				set_parent(parent)
+        
+        @assembly = assembly
+        
+        # set representation and placement
+        set_Product_ObjectPlacement(entity, nil)
+        set_Product_Representation(entity)
 
 				# "local" IFC array
 				@a_Attributes = Array.new
@@ -1878,12 +2545,9 @@ module Brewsky
 				@a_Attributes << set_name(entity, "IfcProduct", true)
 				@a_Attributes << set_description(entity, "IfcProduct")
 				@a_Attributes << set_ObjectType
-				@a_Attributes << set_objectPlacement(entity).record_nr
-				@a_Attributes << set_ProductRepresentation(entity).record_nr
+				@a_Attributes << @objectPlacement.record_nr
+				@a_Attributes << if @representation.nil? then nil else @representation.record_nr end
 				@a_Attributes << set_Tag
-				
-				#add self to the list of entities contained in the building
-				@ifc_exporter.add_to_building(self)
 			end
 		end
 
@@ -1898,8 +2562,20 @@ module Brewsky
 			#Representation	  IfcProductRepresentation (ENTITY)	IfcProduct (OPTIONAL)
 			#Tag	            IfcIdentifier (STRING)	          IfcElement (OPTIONAL)
 			#PredefinedType		IfcSlabTypeEnum (ENUM)						IfcSlab (OPTIONAL)
-			def initialize(ifc_exporter, entity)
+			def initialize(ifc_exporter, parent, entity=nil, assembly=false)
 				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+				
+				# set parent object
+				set_parent(parent)
+        
+        @assembly = assembly
+        
+        # set representation and placement
+        set_Product_ObjectPlacement(entity, nil)
+        set_Product_Representation(entity)
 
 				# "local" IFC array
 				@a_Attributes = Array.new
@@ -1908,13 +2584,10 @@ module Brewsky
 				@a_Attributes << set_name(entity, "IfcProduct", true)
 				@a_Attributes << set_description(entity, "IfcProduct")
 				@a_Attributes << set_ObjectType
-				@a_Attributes << set_objectPlacement(entity).record_nr
-				@a_Attributes << set_ProductRepresentation(entity).record_nr
+				@a_Attributes << @objectPlacement.record_nr
+				@a_Attributes << if @representation.nil? then nil else @representation.record_nr end
 				@a_Attributes << set_Tag
 				@a_Attributes << set_PredefinedType
-				
-				#add self to the list of entities contained in the building
-				@ifc_exporter.add_to_building(self)
 			end
 			def set_PredefinedType
 				return nil
@@ -1931,8 +2604,20 @@ module Brewsky
 			#ObjectPlacement	IfcObjectPlacement (ENTITY)	      IfcProduct (OPTIONAL)
 			#Representation	  IfcProductRepresentation (ENTITY)	IfcProduct (OPTIONAL)
 			#Tag	            IfcIdentifier (STRING)	          IfcElement (OPTIONAL)
-			def initialize(ifc_exporter, entity)
+			def initialize(ifc_exporter, parent, entity=nil, assembly=false)
 				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+				
+				# set parent object
+				set_parent(parent)
+        
+        @assembly = assembly
+        
+        # set representation and placement
+        set_Product_ObjectPlacement(entity, nil)
+        set_Product_Representation(entity)
 
 				# "local" IFC array
 				@a_Attributes = Array.new
@@ -1941,12 +2626,9 @@ module Brewsky
 				@a_Attributes << set_name(entity, "IfcProduct", true)
 				@a_Attributes << set_description(entity, "IfcProduct")
 				@a_Attributes << set_ObjectType
-				@a_Attributes << set_objectPlacement(entity).record_nr
-				@a_Attributes << set_ProductRepresentation(entity).record_nr
+				@a_Attributes << @objectPlacement.record_nr
+				@a_Attributes << if @representation.nil? then nil else @representation.record_nr end
 				@a_Attributes << set_Tag
-				
-				#add self to the list of entities contained in the building
-				@ifc_exporter.add_to_building(self)
 			end
 		end
 
@@ -1960,8 +2642,22 @@ module Brewsky
 			#ObjectPlacement	IfcObjectPlacement (ENTITY)	      IfcProduct (OPTIONAL)
 			#Representation	  IfcProductRepresentation (ENTITY)	IfcProduct (OPTIONAL)
 			#Tag	            IfcIdentifier (STRING)	          IfcElement (OPTIONAL)
-			def initialize(ifc_exporter, entity)
+			def initialize(ifc_exporter, parent, entity=nil, assembly=false)
 				init_common(ifc_exporter)
+				
+        # set subtype
+        set_subtype(entity)
+				
+				# set parent object
+				set_parent(parent)
+        
+        @assembly = assembly
+        
+        # set representation and placement
+        set_Product_ObjectPlacement(entity, nil)
+        set_Product_Representation(entity)
+				@a_Attributes << @objectPlacement.record_nr
+				@a_Attributes << @representation.record_nr
 
 				# "local" IFC array
 				@a_Attributes = Array.new
@@ -1970,12 +2666,9 @@ module Brewsky
 				@a_Attributes << set_name(entity, "IfcProduct", true)
 				@a_Attributes << set_description(entity, "IfcProduct")
 				@a_Attributes << set_ObjectType
-				@a_Attributes << set_objectPlacement(entity).record_nr
-				@a_Attributes << set_ProductRepresentation(entity).record_nr
+				@a_Attributes << @objectPlacement.record_nr
+				@a_Attributes << if @representation.nil? then nil else @representation.record_nr end
 				@a_Attributes << set_Tag
-				
-				#add self to the list of entities contained in the building
-				@ifc_exporter.add_to_building(self)
 			end
 		end
 		
@@ -1994,15 +2687,12 @@ module Brewsky
 				@a_Attributes << set_name(planar) #optional
 				@a_Attributes << set_description(planar) #optional
 				@a_Attributes << set_objectType("Planar") #optional
-				@a_Attributes << set_objectPlacement(planar).record_nr #optional
+				@a_Attributes << set_ObjectPlacement(planar).record_nr #optional
 				@a_Attributes << set_representations.record_nr #optional
 				@a_Attributes << set_tag(planar) #optional
 				
 				# define openings
 				openings
-				
-				#add self to the list of entities contained in the building
-				@ifc_exporter.add_to_building(self)
 			end
 			def set_representations
 				# Ifcplate has 2 or more representations, 
@@ -2057,7 +2747,7 @@ module Brewsky
 				#@a_Attributes << set_name(planar) #optional
 				#@a_Attributes << set_description(planar) #optional
 				#@a_Attributes << set_objectType("Planar") #optional
-				#@a_Attributes << set_objectPlacement(planar).record_nr #optional
+				#@a_Attributes << set_ObjectPlacement(planar).record_nr #optional
 				#@a_Attributes << set_representations.record_nr #optional
 				#@a_Attributes << set_tag(planar) #optional
 				
@@ -2101,7 +2791,7 @@ module Brewsky
 				#@a_Attributes << set_name(planar) #optional
 				#@a_Attributes << set_description(planar) #optional
 				#@a_Attributes << set_objectType("Planar") #optional
-				#@a_Attributes << set_objectPlacement(planar).record_nr #optional
+				#@a_Attributes << set_ObjectPlacement(planar).record_nr #optional
 				#@a_Attributes << set_representations.record_nr #optional
 				#@a_Attributes << set_tag(planar) #optional
 				#@a_Attributes << ifcSlabTypeEnum(planar) #optional
@@ -2150,7 +2840,7 @@ module Brewsky
 				@a_Attributes << set_name(planar)
 				@a_Attributes << set_description(planar)
 				@a_Attributes << set_objectType("Planar")
-				@a_Attributes << set_objectPlacement(planar).record_nr
+				@a_Attributes << set_ObjectPlacement(planar).record_nr
 				@a_Attributes << set_representations.record_nr
 				@a_Attributes << set_tag(planar)
 				
@@ -2159,9 +2849,6 @@ module Brewsky
 				
 				set_BaseQuantities
 				set_materials
-				
-				#add self to the list of entities contained in the building
-				@ifc_exporter.add_to_building(self)
 			end
 			def set_materials
 				if @planar.source.material.nil?
@@ -2179,7 +2866,7 @@ module Brewsky
 				aRelatedObjects << self.record_nr
 				IfcRelAssociatesMaterial.new(@ifc_exporter, aRelatedObjects, materialLayerSetUsage)
 			end
-			def set_objectPlacement(bt_entity)
+			def set_ObjectPlacement(bt_entity)
 				
 				#parent transformation
 				transformation_parent = nil
